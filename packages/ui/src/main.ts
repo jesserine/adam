@@ -59,8 +59,14 @@ const aiButton = h(
   },
   "✨ Configure AI",
 );
+aiButton.hidden = host.kind !== "vscode";
 
 async function updateAiButton(summary?: AiConfigSummary): Promise<void> {
+  if (host.kind !== "vscode") {
+    aiButton.hidden = true;
+    return;
+  }
+  aiButton.hidden = false;
   try {
     const config = summary ?? (await host.getAiConfig());
     const info = getAiButtonInfo(config);

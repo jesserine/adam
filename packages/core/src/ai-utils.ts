@@ -109,16 +109,10 @@ export async function probeAiProviderKey(
       };
     }
 
-    const errJson = (await res.json().catch(() => ({}))) as Record<string, any>;
-    const msg =
-      errJson.error?.message ||
-      errJson.message ||
-      `Authentication failed (HTTP ${res.status}: ${res.statusText})`;
-
     return {
       provider,
       ok: false,
-      message: msg,
+      message: `Provider request failed (HTTP ${res.status}). Check the API key and selected model, then try again.`,
       latencyMs,
     };
   } catch (err: unknown) {
@@ -126,7 +120,9 @@ export async function probeAiProviderKey(
     return {
       provider,
       ok: false,
-      message: error?.name === "AbortError" ? "Connection timed out after 10 seconds." : (error?.message ?? String(err)),
+      message: error?.name === "AbortError"
+        ? "Connection timed out after 10 seconds."
+        : "Provider request failed. Check the API key and network connection, then try again.",
     };
   } finally {
     clearTimeout(timeout);

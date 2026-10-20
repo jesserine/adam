@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Adam (dev)",
+      "type": "shell",
+      "command": "node scripts/build.mjs --dev",
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

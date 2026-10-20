@@ -4,22 +4,12 @@ import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 import {
-  analyzeNodeSecurityThreats,
   indexRepository,
-  probeAiProviderKey,
   readNodeContent,
   readSymbolCode,
-  ThreatAnalysisError,
-  type AiProvider,
-  type AiValidationResult,
-  type AnalyzeThreatsRequest,
   type CodeGraph,
-  type DeleteAiConfigRequest,
   type IndexOptions,
-  type SaveAiConfigRequest,
-  type ValidateAiKeyRequest,
 } from "@adam/core";
-import { AiConfigStore } from "./ai-store";
 
 export interface ServiceOptions extends IndexOptions {
   /** Shared secret every API call must present. Generated when omitted. */
@@ -52,14 +42,13 @@ class HttpError extends Error {
 
 /**
  * The local Adam service: owns the index for one repository and serves it to any client
- * (the VS Code extension, the standalone web UI, later a desktop app) over localhost.
+ * (the VS Code extension and internal browser dev/test harness) over localhost.
  *
  * It listens on 127.0.0.1 only, requires a bearer token on every API call, and rejects
  * foreign Host and Origin headers so web pages in the user's browser cannot read the graph.
  */
 export class AdamService {
   readonly token: string;
-  readonly aiStore: AiConfigStore;
   private graph: CodeGraph | undefined;
   private indexing: Promise<CodeGraph> | undefined;
   private pending = false;
@@ -71,8 +60,6 @@ export class AdamService {
 
   constructor(private readonly options: ServiceOptions) {
     this.token = options.token ?? randomBytes(24).toString("base64url");
-    const configDir = typeof options.cacheDir === "string" ? options.cacheDir : path.join(this.root, ".adam");
-    this.aiStore = new AiConfigStore(path.join(configDir, "ai-config.json"));
   }
 
   get root(): string {
@@ -194,76 +181,6 @@ export class AdamService {
       }
       case "GET /api/events":
         return this.openEvents(res);
-      case "GET /api/ai/config":
-        return sendJson(res, 200, await this.aiStore.getConfigSummary());
-      case "POST /api/ai/config": {
-        const body = await readJsonBody<SaveAiConfigRequest>(req);
-        if (!body.provider) throw new HttpError(400, "Missing provider");
-        const summary = await this.aiStore.saveKey(body);
-        return sendJson(res, 200, summary);
-      }
-      case "DELETE /api/ai/config": {
-        const body = await readJsonBody<DeleteAiConfigRequest>(req);
-        if (!body.provider) throw new HttpError(400, "Missing provider");
-        const summary = await this.aiStore.deleteKey(body.provider);
-        return sendJson(res, 200, summary);
-      }
-      case "POST /api/ai/active": {
-        const body = await readJsonBody<{ provider: AiProvider }>(req);
-        if (!body.provider) throw new HttpError(400, "Missing provider");
-        const summary = await this.aiStore.setActiveProvider(body.provider);
-        return sendJson(res, 200, summary);
-      }
-      case "POST /api/ai/validate": {
-        const body = await readJsonBody<ValidateAiKeyRequest>(req);
-        if (!body.provider) throw new HttpError(400, "Missing provider");
-        const key = body.apiKey || (await this.aiStore.getRawKey(body.provider));
-        if (!key) {
-          const result: AiValidationResult = {
-            provider: body.provider,
-            ok: false,
-            message: "No API key configured for provider",
-          };
-          return sendJson(res, 200, result);
-        }
-        const result = await probeAiProviderKey(body.provider, key);
-        await this.aiStore.recordTestResult(body.provider, result.ok, result.ok ? undefined : result.message);
-        return sendJson(res, 200, result);
-      }
-      case "POST /api/ai/threats": {
-        const body = await readJsonBody<AnalyzeThreatsRequest>(req);
-        if (!body.nodeId) throw new HttpError(400, "Missing nodeId");
-        const node = await this.findNode(body.nodeId);
-        if (node.sensitive) {
-          throw new HttpError(400, "Sensitive files cannot be sent to an AI model");
-        }
-        const summary = await this.aiStore.getConfigSummary();
-        const activeProvider = summary.activeProvider;
-        if (!activeProvider) {
-          throw new HttpError(400, "No active AI provider configured");
-        }
-        const apiKey = await this.aiStore.getRawKey(activeProvider);
-        if (!apiKey) {
-          throw new HttpError(400, `No API key configured for provider ${activeProvider}`);
-        }
-        const selectedModel = summary.providers[activeProvider]?.selectedModel;
-        const nodeContent = readNodeContent(this.root, node);
-        try {
-          const report = await analyzeNodeSecurityThreats({
-            node,
-            content: nodeContent,
-            provider: activeProvider,
-            apiKey,
-            model: selectedModel,
-          });
-          return sendJson(res, 200, report);
-        } catch (err: unknown) {
-          if (err instanceof ThreatAnalysisError) {
-            throw new HttpError(err.status ?? 500, err.message);
-          }
-          throw err;
-        }
-      }
       default:
         throw new HttpError(404, "Not found");
     }

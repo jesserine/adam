@@ -41,7 +41,8 @@ npm run package
 code --install-extension packages/vscode/adam-0.1.0.vsix
 ```
 
-Then run **Adam: Open Network View** from the command palette.
+Then run **Adam: Open Network View** from the command palette. Step-by-step instructions, including
+running the extension with F5, are in [docs/testing-locally.md](docs/testing-locally.md).
 
 ## Layout
 

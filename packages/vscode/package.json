@@ -1,0 +1,92 @@
+{
+  "name": "adam",
+  "displayName": "Adam: Code Network",
+  "description": "See your codebase as a live network of nodes. Click a file to read its functions, follow its connections, and keep secrets masked.",
+  "version": "0.1.0",
+  "preview": true,
+  "publisher": "adam-ide",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1a1a19",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jueviolegrace13/adam.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jueviolegrace13/adam/issues"
+  },
+  "homepage": "https://github.com/jueviolegrace13/adam#readme",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "code graph",
+    "dependency graph",
+    "architecture",
+    "onboarding",
+    "typescript",
+    "secrets"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "adam.openNetwork",
+        "title": "Open Network View",
+        "category": "Adam",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "adam.reindex",
+        "title": "Re-index Workspace",
+        "category": "Adam"
+      },
+      {
+        "command": "adam.openInBrowser",
+        "title": "Open Network View in Browser",
+        "category": "Adam"
+      },
+      {
+        "command": "adam.showLog",
+        "title": "Show Log",
+        "category": "Adam"
+      }
+    ],
+    "configuration": {
+      "title": "Adam",
+      "properties": {
+        "adam.ignore": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra paths Adam leaves out of the network, in `.gitignore` syntax. `node_modules`, build output and everything in `.gitignore` are already left out."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package --no-dependencies",
+    "publish:vsce": "vsce publish --no-dependencies",
+    "publish:ovsx": "ovsx publish --no-dependencies"
+  },
+  "devDependencies": {
+    "@adam/core": "0.1.0",
+    "@adam/service": "0.1.0",
+    "@adam/ui": "0.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "ovsx": "^1.3.0"
+  }
+}

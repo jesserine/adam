@@ -1,0 +1,112 @@
+import type { CodeGraph, CodeSymbol, GraphNode } from "@adam/core";
+
+export interface NodeResponse {
+  node: GraphNode;
+  content: string;
+  masked: boolean;
+  redactions: number;
+}
+
+export interface SymbolResponse {
+  symbol: CodeSymbol;
+  content: string;
+  masked: boolean;
+  redactions: number;
+}
+
+/**
+ * Everything the UI needs from wherever it runs. The VS Code webview talks to the extension
+ * over postMessage; the standalone web UI talks to the Adam service over HTTP. The UI itself
+ * never knows which.
+ */
+export interface Host {
+  readonly kind: "vscode" | "browser";
+  getGraph(): Promise<CodeGraph>;
+  getNode(id: string): Promise<NodeResponse>;
+  getSymbol(nodeId: string, symbolId: string): Promise<SymbolResponse>;
+  reindex(): Promise<void>;
+  onGraphChanged(listener: () => void): void;
+  /** Opens the file in a real editor for manual editing. Absent when there is no editor. */
+  openFile?(path: string, line?: number): void;
+}
+
+/** Messages exchanged between the webview and the extension. */
+export type WebviewRequest =
+  | { type: "request"; id: number; method: "graph" }
+  | { type: "request"; id: number; method: "node"; params: { id: string } }
+  | { type: "request"; id: number; method: "symbol"; params: { node: string; id: string } }
+  | { type: "request"; id: number; method: "reindex" }
+  | { type: "openFile"; path: string; line?: number };
+
+export type ExtensionMessage =
+  | { type: "response"; id: number; ok: true; result: unknown }
+  | { type: "response"; id: number; ok: false; error: string }
+  | { type: "event"; event: "graph" };
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type RequestBody = DistributiveOmit<Extract<WebviewRequest, { type: "request" }>, "id">;
+
+interface VsCodeApi {
+  postMessage(message: WebviewRequest): void;
+}
+
+declare function acquireVsCodeApi(): VsCodeApi;
+
+function createVsCodeHost(api: VsCodeApi): Host {
+  let nextId = 1;
+  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  const listeners: Array<() => void> = [];
+
+  window.addEventListener("message", (e: MessageEvent<ExtensionMessage>) => {
+    const msg = e.data;
+    if (msg.type === "event") listeners.forEach((l) => l());
+    if (msg.type !== "response") return;
+    const p = pending.get(msg.id);
+    if (!p) return;
+    pending.delete(msg.id);
+    if (msg.ok) p.resolve(msg.result);
+    else p.reject(new Error(msg.error));
+  });
+
+  const request = <T>(req: RequestBody): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      api.postMessage({ ...req, id } as WebviewRequest);
+    });
+
+  return {
+    kind: "vscode",
+    getGraph: () => request({ type: "request", method: "graph" }),
+    getNode: (id) => request({ type: "request", method: "node", params: { id } }),
+    getSymbol: (node, id) => request({ type: "request", method: "symbol", params: { node, id } }),
+    reindex: () => request({ type: "request", method: "reindex" }),
+    onGraphChanged: (l) => listeners.push(l),
+    openFile: (path, line) => api.postMessage({ type: "openFile", path, line }),
+  };
+}
+
+function createBrowserHost(): Host {
+  // The token rides in the URL fragment, which browsers never send to a server or a referrer.
+  const token = new URLSearchParams(location.hash.slice(1)).get("token") ?? "";
+  const call = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+    const res = await fetch(path, { ...init, headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? res.statusText);
+    return (await res.json()) as T;
+  };
+  return {
+    kind: "browser",
+    getGraph: () => call("/api/graph"),
+    getNode: (id) => call(`/api/node?id=${encodeURIComponent(id)}`),
+    getSymbol: (node, id) => call(`/api/symbol?node=${encodeURIComponent(node)}&id=${encodeURIComponent(id)}`),
+    reindex: async () => void (await call("/api/reindex", { method: "POST" })),
+    onGraphChanged: (listener) => {
+      const events = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+      events.addEventListener("graph", () => listener());
+    },
+  };
+}
+
+export function createHost(): Host {
+  return typeof acquireVsCodeApi === "function" ? createVsCodeHost(acquireVsCodeApi()) : createBrowserHost();
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@adam/service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Adam's local service: indexes a repository and serves its graph over a token-protected localhost API, plus the web UI.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "bin": {
+    "adam-service": "dist/main.js"
+  },
+  "dependencies": {
+    "@adam/core": "0.1.0"
+  }
+}

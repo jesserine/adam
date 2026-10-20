@@ -1,0 +1,35 @@
+name: Publish extension
+
+# Runs only when started by hand from the Actions tab, after the publisher ID and the
+# VSCE_PAT / OVSX_PAT repository secrets are set up (see docs/publishing.md).
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Where to publish
+        type: choice
+        options: [both, vs-marketplace, open-vsx]
+        default: both
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run package
+      - if: inputs.target != 'open-vsx'
+        working-directory: packages/vscode
+        run: npx vsce publish --no-dependencies --packagePath *.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - if: inputs.target != 'vs-marketplace'
+        working-directory: packages/vscode
+        run: npx ovsx publish *.vsix
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}

@@ -58,15 +58,17 @@ Open any project folder and run **Adam: Open Network View**. To remove it later,
 
 ## What to check
 
-- **Network:** every file is a dot, imports are lines, colours are module folders (legend at the
-  bottom left). Scroll to zoom, drag to pan, **Fit** to frame what is on screen.
-- **Clusters:** a repo with more than 150 files opens collapsed, one ringed node per package or
-  module folder (`apps/web · 180`), with lines summed between them. Double-click a cluster, or
-  **Expand folder** in its panel, to open it into its subfolders and files; **Collapse folder** on
+- **Network:** every file is a dot, imports are faint curved lines, and colours are groups of
+  folders. A node's size follows how many links it has, and only the busiest files are
+  labelled. Scroll to zoom, drag to pan, and use **Fit** to frame what is on screen.
+- **Sidebar:** search at the top, then the inspected node, then **Groups**. Each group shows its
+  colour and file count; untick a group to hide it, or untick **Show all** to hide them all.
+- **Clusters:** a repo with more than 150 files opens collapsed, with one node per colour group
+  (`excalidraw/components/ · 309`) and lines summed between them. Double-click a folder, or
+  **Expand folder** in its panel, to open it into its subfolders and files. **Collapse folder** on
   any node inside folds it back. **Expand all** and **Collapse all** are in the toolbar.
-- **Regions:** every cluster sits in its own circle, with its folders as circles inside it and
-  the most connected files at their centre. Opening a cluster zooms to its circle and fades
-  everything it does not connect to; a bar says "Viewing …". **Show all** or Esc goes back.
+- **Viewing a folder:** opening a folder zooms to its files and fades everything it does not
+  connect to, and a bar says "Viewing …". **Show all** or Esc goes back.
 - **Hover a node:** its links light up and the rest fades, until the pointer leaves.
 - **Click a node (focus):** its links stay lit and a bar at the top says what is focused. Bright
   arrows are imports, grey ones are imported-by. While focused, clicking any other node only

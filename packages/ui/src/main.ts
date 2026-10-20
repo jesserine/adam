@@ -34,10 +34,11 @@ const networkTab = h("button", { class: "tab active", onclick: () => setView("ne
 const foldersTab = h("button", { class: "tab", onclick: () => setView("folders") }, "Folders");
 const hideUnconnected = h("input", { type: "checkbox", id: "f-unconnected" });
 const hideTypeOnly = h("input", { type: "checkbox", id: "f-typeonly" });
-const legend = h("div", { class: "legend", "aria-label": "Legend" });
+const groupsEl = h("div", { class: "groups", "aria-label": "Groups" });
+const selectAll = h("input", { type: "checkbox", checked: true, "aria-label": "Show every group" });
 const networkEl = h("div", { class: "network" });
 const treeEl = h("div", { class: "tree", hidden: true });
-const panelEl = h("aside", { class: "panel", hidden: true });
+const panelEl = h("div", { class: "panel" });
 const statusEl = h("div", { class: "status", hidden: true });
 const focusBar = h("div", { class: "focus-bar", hidden: true });
 
@@ -50,17 +51,27 @@ document.body.append(
       { class: "toolbar" },
       h("span", { class: "brand" }, "Adam"),
       h("div", { class: "tabs", role: "tablist" }, networkTab, foldersTab),
-      search,
-      datalist,
       h("label", { class: "filter" }, hideUnconnected, "Hide unconnected"),
       h("label", { class: "filter" }, hideTypeOnly, "Hide type-only imports"),
       h("button", { class: "ghost", onclick: () => void reindex(), title: "Re-index the repository" }, "Re-index"),
       h("button", { class: "ghost", onclick: () => network.expandAll(), title: "Show every file" }, "Expand all"),
       h("button", { class: "ghost", onclick: () => network.collapseAll(), title: "Fold every folder back into its cluster" }, "Collapse all"),
       h("button", { class: "ghost", onclick: () => network.fit(), title: "Fit what is on screen" }, "Fit"),
-      stats,
     ),
-    h("main", { class: "main" }, h("div", { class: "canvas" }, networkEl, treeEl, focusBar, legend, statusEl), panelEl),
+    h(
+      "main",
+      { class: "main" },
+      h("div", { class: "canvas" }, networkEl, treeEl, focusBar, statusEl),
+      // A sidebar like Graphify's: search, the inspected node, and the groups with show/hide toggles.
+      h(
+        "aside",
+        { class: "sidebar" },
+        h("div", { class: "side-search" }, search, datalist),
+        h("section", { class: "side-info" }, h("h3", {}, "Node info"), panelEl),
+        h("section", { class: "side-groups" }, h("h3", {}, "Groups"), h("label", { class: "group-row all" }, selectAll, h("span", {}, "Show all")), groupsEl),
+        h("footer", { class: "side-stats" }, stats),
+      ),
+    ),
   ),
 );
 
@@ -68,12 +79,16 @@ const network = new NetworkView(networkEl, detectTheme(), (s) => onNetworkChange
 
 new MutationObserver(() => {
   network.setTheme(detectTheme());
-  renderLegend();
+  renderGroups();
 }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
 const applyFilters = () => network.setFilters({ hideUnconnected: hideUnconnected.checked, hideTypeOnly: hideTypeOnly.checked });
 hideUnconnected.addEventListener("change", applyFilters);
 hideTypeOnly.addEventListener("change", applyFilters);
+selectAll.addEventListener("change", () => {
+  network.setAllGroups(selectAll.checked);
+  renderGroups();
+});
 
 search.addEventListener("change", () => findNode(search.value));
 search.addEventListener("keydown", (e) => {
@@ -141,7 +156,7 @@ function setView(view: "network" | "folders"): void {
   networkTab.classList.toggle("active", view === "network");
   foldersTab.classList.toggle("active", view === "folders");
   networkEl.hidden = view !== "network";
-  legend.hidden = view !== "network";
+  groupsEl.closest("section")!.hidden = view !== "network";
   treeEl.hidden = view !== "folders";
   if (view === "folders") renderTree();
   renderFocusBar();
@@ -150,7 +165,7 @@ function setView(view: "network" | "folders"): void {
 function renderPanel(): void {
   const id = state.selected;
   if (!id || !state.graph || !state.adj) {
-    panelEl.hidden = true;
+    panelEl.replaceChildren(h("p", { class: "empty" }, "Click a node to inspect it."));
     return;
   }
   const collapse = network.canCollapse(id)
@@ -170,7 +185,7 @@ function renderPanel(): void {
   } else {
     const node = state.graph.nodes.find((n) => n.id === id);
     if (!node) {
-      panelEl.hidden = true;
+      panelEl.replaceChildren(h("p", { class: "empty" }, "Click a node to inspect it."));
       return;
     }
     renderNodePanel(panelEl, node, {
@@ -181,8 +196,7 @@ function renderPanel(): void {
       actions: collapse,
     });
   }
-  panelEl.hidden = false;
-  panelEl.scrollTop = 0;
+  panelEl.closest("section")!.scrollTop = 0;
 }
 
 function renderTree(): void {
@@ -213,9 +227,22 @@ function markTreeSelection(): void {
   });
 }
 
-function renderLegend(): void {
-  legend.replaceChildren(
-    ...network.legend().map((i) => h("span", { class: "legend-item" }, h("i", { style: `background:${i.color}` }), i.label)),
+/** The groups list: a colour, a name and a file count per group, each with a show/hide checkbox. */
+function renderGroups(): void {
+  const groups = network.legend();
+  const hidden = groups.filter((g) => g.hidden).length;
+  selectAll.checked = hidden === 0;
+  selectAll.indeterminate = hidden > 0 && hidden < groups.length;
+  groupsEl.replaceChildren(
+    ...groups.map((g) => {
+      const box = h("input", { type: "checkbox", checked: !g.hidden });
+      box.addEventListener("change", () => {
+        network.toggleGroup(g.key);
+        renderGroups();
+      });
+      return h("label", { class: "group-row", title: g.label }, box, h("i", { style: `background:${g.color}` }), h("span", { class: "group-name" }, g.label), h("span", { class: "group-count" }, `${g.count}`));
+    }),
+    h("div", { class: "group-row note" }, h("i", { style: `background:${network.sensitiveColor()}` }), h("span", { class: "group-name" }, "sensitive files (masked)")),
   );
 }
 
@@ -234,7 +261,7 @@ async function load(): Promise<void> {
     const s = graph.stats;
     stats.textContent = `${s.nodes} nodes · ${s.edges} edges · ${s.sensitive} sensitive`;
     stats.title = `Indexed in ${s.durationMs} ms (${s.reparsed} files re-read)`;
-    renderLegend();
+    renderGroups();
     if (state.view === "folders") renderTree();
     renderPanel();
     showStatus(graph.nodes.length ? undefined : "This folder has no files to index.");

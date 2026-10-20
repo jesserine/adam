@@ -55,13 +55,21 @@ Roslyn's references is the next benchmark to add.
 
 ## Network view
 
-- Files are laid out by region, like nested rings: each cluster is a circle, each folder a circle
-  inside it, and files are packed in their folder with the most connected ones at the centre
-  (d3-hierarchy `pack`). The layout is computed once over every file and never moves, so it reads
-  the same every time. A collapsed folder becomes one node at the centre of its region, and edges
-  between nodes are summed file imports. Opening or closing a folder rebuilds the screen graph
-  without moving anything, and the camera keeps a fixed frame.
-- Opening a folder frames its region and puts the view in "viewing" mode: the folder's files and
+- The view is styled after Graphify's graph page. One ForceAtlas2 layout (LinLog mode) runs over
+  every file, then noverlap spreads out any nodes that overlap. Each colour group has an
+  invisible anchor that its files are tied to, so a group stays in one place and files with no
+  imports sit with their group. The layout is computed once and never moves. A collapsed folder
+  becomes one node at the middle of its files, and edges between nodes are summed file imports.
+  Opening or closing a folder rebuilds the screen graph without moving anything, and the camera
+  keeps a fixed frame.
+- Colour groups (`colorGroups` in `model.ts`) start from the clusters. The biggest group keeps
+  opening into its subfolders while the groups still fit the 10 colours. A group holding more
+  than a quarter of the files opens past that limit (the extra groups are grey). Repos with more
+  than 150 files open with each colour group collapsed to one node.
+- A node's size grows with its links. Only hubs and folders are labelled; other labels show on
+  hover or when the node is lit. Edges are faint curves in their source's colour. The sidebar
+  holds search, the inspected node, and the groups with show/hide checkboxes.
+- Opening a folder frames its files and puts the view in "viewing" mode: the folder's files and
   anything they import or are imported by stay bright, the rest fades. Esc (or clicking the
   empty canvas) steps back: first the focus, then the viewing mode.
 - Folders fold along each file's path, starting from its cluster (`apps/web`, `packages/db`).

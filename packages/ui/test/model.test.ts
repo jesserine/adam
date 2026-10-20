@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CodeGraph, GraphNode } from "@adam/core";
-import { sharedPrefix, assignClusterSlots, buildTree, clusterOf, fileLabels, Folding, groupFolder, groupId, packRegions, ROOT_CLUSTER } from "../src/model";
+import { sharedPrefix, assignClusterSlots, buildTree, clusterOf, fileLabels, Folding, colorGroups, groupFolder, groupId, ROOT_CLUSTER } from "../src/model";
 
 const graphOf = (ids: string[]): CodeGraph =>
   ({
@@ -34,8 +34,8 @@ describe("assignClusterSlots", () => {
   });
 
   it("folds clusters beyond the palette into other", () => {
-    const ids = Array.from({ length: 10 }, (_, i) => `f${i}/x`);
-    expect(assignClusterSlots(graphOf(ids)).size).toBe(7);
+    const ids = Array.from({ length: 13 }, (_, i) => `f${i}/x`);
+    expect(assignClusterSlots(graphOf(ids)).size).toBe(10);
   });
 
   it("gives tool folders like .github no colour of their own", () => {
@@ -118,41 +118,40 @@ describe("sharedPrefix", () => {
   });
 });
 
-describe("packRegions", () => {
+describe("colorGroups", () => {
   const files = [
     "apps/web/src/main.tsx",
     "apps/web/src/lib/a.ts",
     "apps/web/src/lib/b.ts",
+    "apps/web/src/routes/x.tsx",
     "apps/web/src/routes/y.tsx",
+    "apps/web/src/routes/z.tsx",
     "packages/db/index.ts",
     "packages/db/schema.ts",
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
     "README.md",
   ];
-  const folding = new Folding(graphOf(files).nodes);
-  const { positions, regions } = packRegions(
-    files.map((id) => ({ id, weight: id.endsWith("main.tsx") ? 5 : 1 })),
-    folding,
-  );
-  const inside = (p: { x: number; y: number }, r: { x: number; y: number; r: number }) =>
-    Math.hypot(p.x - r.x, p.y - r.y) <= r.r + 1e-6;
+  const { nodes } = graphOf(files);
+  const folding = new Folding(nodes);
 
-  it("places every file inside each folder region on its path", () => {
-    expect(positions.size).toBe(files.length);
-    for (const f of files) {
-      for (const folder of folding.pathTo(f)) expect(inside(positions.get(f)!, regions.get(folder)!)).toBe(true);
-    }
+  it("opens the biggest cluster into its subfolders while the groups fit", () => {
+    const { groupOf, counts } = colorGroups(nodes, folding);
+    expect(groupOf.get("apps/web/src/routes/x.tsx")).toBe("apps/web/src/routes");
+    expect(groupOf.get("apps/web/src/lib/a.ts")).toBe("apps/web/src/lib");
+    expect(groupOf.get("apps/web/src/main.tsx")).toBe("apps/web");
+    expect(groupOf.get("packages/db/index.ts")).toBe("packages/db");
+    expect(groupOf.get("README.md")).toBe(ROOT_CLUSTER);
+    expect(counts.get("apps/web/src/routes")).toBe(3);
   });
 
-  it("nests folder regions and keeps clusters apart", () => {
-    expect(regions.get("apps/web")!.depth).toBe(1);
-    expect(regions.get("apps/web/src/lib")!.depth).toBe(2);
-    const web = regions.get("apps/web")!;
-    const db = regions.get("packages/db")!;
-    expect(Math.hypot(web.x - db.x, web.y - db.y)).toBeGreaterThanOrEqual(web.r + db.r);
-  });
-
-  it("is deterministic", () => {
-    const again = packRegions(files.map((id) => ({ id, weight: id.endsWith("main.tsx") ? 5 : 1 })), folding);
-    expect(again.positions.get("apps/web/src/main.tsx")).toEqual(positions.get("apps/web/src/main.tsx"));
+  it("never splits tool folders, and stops at the limit unless one group dominates", () => {
+    const { groupOf } = colorGroups(nodes, folding, 3);
+    expect(groupOf.get(".github/workflows/ci.yml")).toBe(".github");
+    // apps/web holds 6 of 9 code files, so it opens past the limit of 3.
+    expect(groupOf.get("apps/web/src/routes/x.tsx")).toBe("apps/web/src/routes");
+    const even = graphOf(["a/x/1", "a/y/1", "b/x/1", "b/y/1", "c/x/1", "c/y/1", "d/x/1", "d/y/1"]).nodes;
+    const groups = colorGroups(even, new Folding(even), 4);
+    expect(groups.groupOf.get("a/x/1")).toBe("a");
   });
 });

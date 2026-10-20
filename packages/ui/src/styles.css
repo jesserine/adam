@@ -101,16 +101,6 @@ button {
   color: var(--accent-fg);
 }
 
-.toolbar input[type="search"] {
-  min-width: 220px;
-  flex: 0 1 320px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--input-fg);
-}
-
 .filter {
   display: inline-flex;
   align-items: center;
@@ -123,12 +113,6 @@ button {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 3px 10px;
-}
-
-.stats {
-  margin-left: auto;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
 }
 
 .main {
@@ -192,36 +176,158 @@ button {
   background: var(--muted);
 }
 
+.trail {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  margin-right: 6px;
+}
+
+.trail .crumb {
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--link);
+}
+
+.trail button.crumb:hover {
+  background: var(--border);
+}
+
+.trail .crumb.current {
+  color: var(--fg);
+}
+
+.trail .sep {
+  color: var(--muted);
+}
+
 .focus-bar button {
   padding: 2px 8px;
 }
 
-.legend {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
+/* The sidebar follows Graphify's: search on top, the inspected node, then the groups. */
+.sidebar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  max-width: calc(100% - 24px);
+  flex-direction: column;
+  width: min(340px, 42vw);
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-2);
+}
+
+.side-search {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.side-search input {
+  width: 100%;
   padding: 6px 10px;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font: inherit;
+}
+
+.side-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sidebar h3 {
+  margin: 0 0 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-.legend-item {
-  display: inline-flex;
+.side-info {
+  flex: 0 1 auto;
+  min-height: 120px;
+  max-height: 60%;
+  overflow: auto;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.side-groups {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+.side-groups[hidden] {
+  display: none;
+}
+
+.group-row {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
 }
 
-.legend-item i {
-  width: 9px;
-  height: 9px;
+.group-row:hover {
+  background: var(--border);
+}
+
+.group-row.all {
+  margin-bottom: 6px;
+  color: var(--muted);
+}
+
+.group-row.note {
+  margin-top: 6px;
+  color: var(--muted);
+  cursor: default;
+}
+
+.group-row.note:hover {
+  background: transparent;
+}
+
+.group-row input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.group-row i {
+  flex: none;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  display: inline-block;
+}
+
+.group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.side-stats {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .status {
@@ -276,19 +382,10 @@ button {
   outline: 1px solid var(--accent);
 }
 
-/* The panel floats over the network, so opening it never resizes the canvas or moves the graph. */
-.panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 3;
-  width: min(440px, 45vw);
-  box-shadow: -6px 0 18px rgb(0 0 0 / 0.18);
-  border-left: 1px solid var(--border);
-  overflow: auto;
-  background: var(--bg);
-  padding: 14px 16px 24px;
+.panel .empty {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
 }
 
 .panel-head {
@@ -526,4 +623,66 @@ button {
     border-left: 0;
     border-top: 1px solid var(--border);
   }
+}
+
+/* Sidebar and panel sections open and close from their headings. */
+.side-info > summary,
+.side-groups > summary,
+.panel-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.side-info > summary::-webkit-details-marker,
+.side-groups > summary::-webkit-details-marker,
+.panel-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.side-info > summary::before,
+.side-groups > summary::before,
+.panel-section > summary::before {
+  content: "▸";
+  width: 10px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.side-info[open] > summary::before,
+.side-groups[open] > summary::before,
+.panel-section[open] > summary::before {
+  content: "▾";
+}
+
+.side-info > summary:hover h3,
+.side-groups > summary:hover h3,
+.panel-section > summary:hover h3 {
+  color: var(--fg);
+}
+
+.side-info:not([open]),
+.side-groups:not([open]) {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.side-groups:not([open]) {
+  border-bottom: 1px solid var(--border);
+}
+
+.tree-folder.selected {
+  border-radius: 3px;
+  background: var(--code-bg);
+  outline: 1px solid var(--accent);
+}
+
+/* In the Folders view there are no groups, so the details panel takes the whole sidebar. */
+.sidebar:has(.side-groups[hidden]) .side-info[open] {
+  flex: 1 1 auto;
+  max-height: none;
 }

@@ -55,15 +55,36 @@ Roslyn's references is the next benchmark to add.
 
 ## Network view
 
-- Files are laid out by region, like nested rings: each cluster is a circle, each folder a circle
-  inside it, and files are packed in their folder with the most connected ones at the centre
-  (d3-hierarchy `pack`). The layout is computed once over every file and never moves, so it reads
-  the same every time. A collapsed folder becomes one node at the centre of its region, and edges
-  between nodes are summed file imports. Opening or closing a folder rebuilds the screen graph
-  without moving anything, and the camera keeps a fixed frame.
-- Opening a folder frames its region and puts the view in "viewing" mode: the folder's files and
-  anything they import or are imported by stay bright, the rest fades. Esc (or clicking the
-  empty canvas) steps back: first the focus, then the viewing mode.
+- The view is styled after Graphify's graph page. The layout (`layout.ts`) is nested: each
+  colour group gets its own round area, and inside it each subfolder gets its own area, down to
+  the files. At every level d3's `packSiblings` packs the entries (subfolders first, then files
+  in the order a quick ForceAtlas2 run puts them, so files that import each other sit together)
+  with a gap left for labels. The groups are then placed by ForceAtlas2 over the imports between
+  them, and noverlap keeps a wide margin between groups. The layout is seeded from file names,
+  computed once and never moves. A collapsed folder becomes one node at the centre of its area,
+  and edges between nodes are summed file imports. Opening or closing a folder rebuilds the
+  screen graph without moving anything.
+- Colour groups (`colorGroups` in `model.ts`) start from the clusters. The biggest group keeps
+  opening into its subfolders while the groups still fit the 10 colours. A group holding more
+  than a quarter of the files opens past that limit (the extra groups are grey). Repos with more
+  than 150 files open with each colour group collapsed to one node.
+- A node's size grows with its links. Only hubs and folders are labelled; other labels show on
+  hover or when the node is lit. Edges are faint curves in their source's colour. The sidebar
+  holds search, the inspected node, and the groups with show/hide checkboxes. Labels are
+  placed after each frame, most important first, and skip any spot that would cover another
+  label or node. An unticked group is always hidden, even inside an open or focused folder.
+- Opening a folder frames its files and puts the view in "viewing" mode: the folder's files and
+  anything they import or are imported by stay bright, the rest fades. Each open is pushed onto
+  a trail shown as a breadcrumb (`All › routes/_app/ › _app/products/`); a crumb, Back or Esc
+  returns to that step with the folders that were open then. Esc clears the focus first.
+  Clicking the empty canvas only clears the focus. Clearing a focus folds back every folder
+  opened while it was set (to show a focused file, or expanded by hand) and returns the camera.
+- The Folders view keeps its own selection and panel (`renderFolderPanel` in `main.ts`): a
+  file gets the network's node panel, a folder the folder panel with links grouped by folder,
+  and no Groups section. **View in network** calls `focusOn` for a file or `viewFolder` for a
+  folder, which opens the matching network folder (or each file, for a folder the network skips)
+  and pushes it onto the trail. Sidebar and panel sections are `<details>` built by
+  `collapsible()` in `dom.ts`, which remembers closed sections by title across re-renders.
 - Folders fold along each file's path, starting from its cluster (`apps/web`, `packages/db`).
   Pass-through folders (a parent's only entry, such as `apps/web/src`) and one-file folders are
   skipped, so every expand shows something new.

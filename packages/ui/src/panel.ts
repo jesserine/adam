@@ -1,5 +1,5 @@
 import type { CodeSymbol, GraphEdge, GraphNode } from "@adam/core";
-import { formatBytes, h } from "./dom";
+import { collapsible, formatBytes, h } from "./dom";
 import type { Host } from "./host";
 import type { UnitLink } from "./network";
 
@@ -176,7 +176,7 @@ function tagList(items: string[], tone = ""): HTMLElement {
 }
 
 function section(title: string, content: HTMLElement, hint?: string): HTMLElement {
-  return h("section", { class: "panel-section" }, h("h3", {}, title), hint ? h("p", { class: "muted small" }, hint) : null, content);
+  return collapsible(title, { class: "panel-section" }, hint ? h("p", { class: "muted small" }, hint) : null, content);
 }
 
 interface GroupPanelContext {
@@ -186,6 +186,8 @@ interface GroupPanelContext {
   incoming: UnitLink[];
   onExpand: () => void;
   onSelect: (id: string) => void;
+  /** Replaces the Expand folder button, such as View in network in the Folders view. */
+  primary?: HTMLElement;
   actions?: HTMLElement[];
 }
 
@@ -210,7 +212,7 @@ export function renderGroupPanel(container: HTMLElement, ctx: GroupPanelContext)
       h(
         "div",
         { class: "panel-actions" },
-        h("button", { class: "primary", onclick: ctx.onExpand, title: "Show this folder's files and subfolders (or double-click it)" }, "Expand folder"),
+        ctx.primary ?? h("button", { class: "primary", onclick: ctx.onExpand, title: "Show this folder's files and subfolders (or double-click it)" }, "Expand folder"),
         ...(ctx.actions ?? []),
       ),
     ),

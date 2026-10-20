@@ -1,5 +1,4 @@
 import type { CodeGraph, GraphNode } from "@adam/core";
-import { hierarchy, pack } from "d3-hierarchy";
 
 /** Folders that only group other modules, so the cluster is one level deeper. */
 const CONTAINER_FOLDERS = new Set(["src", "packages", "apps", "libs", "lib", "app", "modules", "services"]);
@@ -37,37 +36,101 @@ export function isToolFolder(folder: string): boolean {
 }
 
 /**
- * Categorical slots, in fixed order (validated palette: blue, orange, aqua, yellow, magenta,
- * green, violet). Red is kept back for sensitive nodes, so a cluster is never mistaken for one.
+ * Categorical slots, in fixed order: the Tableau palette Graphify uses (blue, orange, teal, green,
+ * yellow, purple, pink, brown, light blue, light orange). Its red is kept back for sensitive
+ * nodes, so a group is never mistaken for one.
  */
 export const CLUSTER_COLORS = {
-  light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6"],
-  dark: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9"],
+  light: ["#4e79a7", "#f28e2b", "#76b7b2", "#59a14f", "#e0b52b", "#b07aa1", "#ff9da7", "#9c755f", "#86b3dc", "#ffbe7d"],
+  dark: ["#4e79a7", "#f28e2b", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#a0cbe8", "#ffbe7d"],
 };
-export const SENSITIVE_COLOR = { light: "#e34948", dark: "#e66767" };
-export const OTHER_COLOR = { light: "#9a9a94", dark: "#76766f" };
+export const SENSITIVE_COLOR = { light: "#e15759", dark: "#e15759" };
+export const OTHER_COLOR = { light: "#a8a29c", dark: "#7d7873" };
 
 /**
- * Gives the largest clusters a colour slot each and folds the rest into "other". Slots already
- * handed out are kept across re-indexes, so a cluster's colour follows it, not its rank.
+ * Gives the largest groups a colour slot each and folds the rest into "other". Slots already
+ * handed out are kept across re-indexes, so a group's colour follows it, not its rank. Tool
+ * folders (`.github`) never get one.
  */
-export function assignClusterSlots(graph: CodeGraph, previous = new Map<string, number>()): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const n of graph.nodes) {
-    const cluster = clusterOf(n);
-    if (!isToolFolder(cluster)) counts.set(cluster, (counts.get(cluster) ?? 0) + 1);
-  }
+export function assignSlots(counts: Map<string, number>, previous = new Map<string, number>()): Map<string, number> {
+  const code = [...counts.entries()].filter(([g, n]) => n > 0 && !isToolFolder(g));
   const slots = new Map<string, number>();
-  for (const [cluster, slot] of previous) if (counts.has(cluster)) slots.set(cluster, slot);
+  for (const [group, slot] of previous) if (code.some(([g]) => g === group)) slots.set(group, slot);
   const free = CLUSTER_COLORS.light.map((_, i) => i).filter((i) => ![...slots.values()].includes(i));
-  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([c]) => c);
-  for (const cluster of ranked) {
-    if (slots.has(cluster)) continue;
+  for (const [group] of code.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+    if (slots.has(group)) continue;
     const slot = free.shift();
     if (slot === undefined) break;
-    slots.set(cluster, slot);
+    slots.set(group, slot);
   }
   return slots;
+}
+
+/** Colour slots for top-level clusters, one per cluster. */
+export function assignClusterSlots(graph: CodeGraph, previous = new Map<string, number>()): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const n of graph.nodes) counts.set(clusterOf(n), (counts.get(clusterOf(n)) ?? 0) + 1);
+  return assignSlots(counts, previous);
+}
+
+/** Files coloured together: each file's group, and how many files each group holds. */
+export interface ColorGroups {
+  groupOf: Map<string, string>;
+  counts: Map<string, number>;
+}
+
+/**
+ * Splits the repo into colour groups, the way Graphify colours communities: start from the
+ * clusters and keep opening the biggest into its subfolders while the groups still fit in `max`
+ * colours. A group holding more than a quarter of the files is opened even past that (up to three
+ * times `max` groups, the extra ones grey) when one of its subfolders is a fifth of it or more, so one huge package never paints the screen one
+ * colour. A three-package monorepo then shows `web/routes`, `web/lib`, `ui` and `domain` in their
+ * own colours instead of one blue blob. Tool folders and root files are never split.
+ */
+export function colorGroups(nodes: Pick<GraphNode, "id" | "folder">[], folding: Folding, max = CLUSTER_COLORS.light.length): ColorGroups {
+  const children = new Map<string, string[]>();
+  for (const f of folding.folders()) {
+    const parent = folding.parentOf(groupId(f));
+    if (parent !== undefined) (children.get(parent) ?? children.set(parent, []).get(parent)!).push(f);
+  }
+  const keys = new Set(nodes.map(clusterOf));
+  const assign = (): ColorGroups => {
+    const groupOf = new Map<string, string>();
+    const counts = new Map<string, number>();
+    for (const n of nodes) {
+      const g = [...folding.pathTo(n.id)].reverse().find((f) => keys.has(f)) ?? clusterOf(n);
+      groupOf.set(n.id, g);
+      counts.set(g, (counts.get(g) ?? 0) + 1);
+    }
+    return { groupOf, counts };
+  };
+  const live = (c: ColorGroups) => [...c.counts.keys()].filter((g) => !isToolFolder(g)).length;
+  const code = nodes.filter((n) => !isToolFolder(clusterOf(n))).length;
+  let current = assign();
+  for (;;) {
+    const candidates = [...current.counts.entries()]
+      .filter(([g]) => !isToolFolder(g) && children.has(g))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    let split = false;
+    for (const [g] of candidates) {
+      const kids = children.get(g)!.filter((k) => !keys.has(k));
+      if (!kids.length) continue;
+      kids.forEach((k) => keys.add(k));
+      const next = assign();
+      // Past the limit, only a dominant group whose subfolders are real parts of it (not a dozen
+      // equal crumbs) is opened.
+      const size = current.counts.get(g)!;
+      const biggestKid = Math.max(...kids.map((k) => next.counts.get(k) ?? 0));
+      const dominant = size > code * 0.25 && biggestKid >= size * 0.2;
+      if (live(next) <= max || (dominant && live(next) <= max * 3)) {
+        current = next;
+        split = true;
+        break;
+      }
+      kids.forEach((k) => keys.delete(k));
+    }
+    if (!split) return current;
+  }
 }
 
 export interface TreeEntry {
@@ -217,61 +280,4 @@ export function fileLabels(ids: string[]): Map<string, string> {
     }
   }
   return labels;
-}
-
-// Regions ------------------------------------------------------------------------------------
-
-export interface Region {
-  x: number;
-  y: number;
-  r: number;
-  /** 1 for a cluster (`apps/web`), deeper for folders inside it. */
-  depth: number;
-}
-
-interface PackNode {
-  id: string;
-  weight: number;
-  children?: PackNode[];
-}
-
-/**
- * Lays every file out by region: each cluster gets its own circle, each foldable folder a circle
- * inside it, and files are packed inside their folder with the most connected ones in the middle.
- * The same files always give the same picture, and opening a folder never moves anything.
- */
-export function packRegions(
-  files: Array<{ id: string; weight: number }>,
-  folding: Folding,
-): { positions: Map<string, { x: number; y: number }>; regions: Map<string, Region>; size: number } {
-  const root: PackNode = { id: "", weight: 0, children: [] };
-  const folders = new Map<string, PackNode>();
-  for (const f of files) {
-    let parent = root;
-    for (const folder of folding.pathTo(f.id)) {
-      let node = folders.get(folder);
-      if (!node) {
-        node = { id: folder, weight: 0, children: [] };
-        folders.set(folder, node);
-        parent.children!.push(node);
-      }
-      parent = node;
-    }
-    parent.children!.push({ id: f.id, weight: f.weight });
-  }
-  const size = 24 * Math.sqrt(Math.max(1, files.length));
-  const tree = hierarchy(root)
-    .sum((d) => (d.children ? 0 : 1))
-    .sort((a, b) => b.value! - a.value! || b.data.weight - a.data.weight || a.data.id.localeCompare(b.data.id));
-  const packed = pack<PackNode>()
-    .size([size, size])
-    .padding((d) => (d.depth === 0 ? 14 : 5))(tree);
-  const positions = new Map<string, { x: number; y: number }>();
-  const regions = new Map<string, Region>();
-  for (const d of packed.descendants()) {
-    if (d.depth === 0) continue;
-    if (d.data.children) regions.set(d.data.id, { x: d.x, y: d.y, r: d.r, depth: d.depth });
-    else positions.set(d.data.id, { x: d.x, y: d.y });
-  }
-  return { positions, regions, size };
 }

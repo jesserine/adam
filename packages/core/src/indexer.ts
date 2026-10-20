@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isBinaryByName, languageOf, looksBinary, SCRIPT_EXTENSIONS } from "./language";
+import { linkDotnet, parseProjectFile, parseSolution, PROJECT_EXTENSIONS, SOLUTION_EXTENSIONS, type MsBuildFacts } from "./dotnet";
+import { isBinaryByName, looksBinary, languageOf, SCRIPT_EXTENSIONS } from "./language";
+import { parseCSharp, type CSharpLinks } from "./parse-csharp";
 import { parseScript, type RawImport } from "./parse-script";
 import { ModuleResolver } from "./resolver";
-import { countSecrets, envKeys, sensitiveReason } from "./sensitive";
+import { countSecrets, declaredKeys, sensitiveReason } from "./sensitive";
 import type { CodeGraph, CodeSymbol, GraphEdge, GraphNode, IndexOptions } from "./types";
 import { GRAPH_VERSION } from "./types";
 import { createIgnore, walk, type WalkedFile } from "./walk";
@@ -25,6 +27,10 @@ interface FileFacts {
   imports: RawImport[];
   envReads: string[];
   envDeclares: string[];
+  /** C# files: namespaces, usings and type names, linked into edges once every file is known. */
+  csharp?: CSharpLinks;
+  /** .NET project and solution files: project references, packages, global usings. */
+  msbuild?: MsBuildFacts;
 }
 
 interface CacheFile {
@@ -81,24 +87,31 @@ async function readFacts(file: WalkedFile, maxParseBytes: number): Promise<FileF
   const lines = content.length === 0 ? 0 : content.split("\n").length;
 
   // Secrets never reach the cache: no hash (it could be brute-forced), no content-derived facts
-  // beyond the names an env file declares.
-  if (sensitive) {
-    const envLike = languageOf(file.rel) === "dotenv" || file.rel.endsWith(".tfvars");
-    return { ...base, lines, envDeclares: envLike ? envKeys(content) : [] };
-  }
+  // beyond the keys an env or settings file declares.
+  if (sensitive) return { ...base, lines, envDeclares: declaredKeys(file.rel, content) };
 
   const hash = createHash("sha256").update(buffer).digest("hex").slice(0, 16);
   const secretHints = countSecrets(content);
   const ext = path.extname(file.rel).toLowerCase();
-  if (!SCRIPT_EXTENSIONS.has(ext) || file.size > maxParseBytes) return { ...base, hash, lines, secretHints };
+  const plain = { ...base, hash, lines, secretHints };
+  if (file.size > maxParseBytes) return plain;
 
-  const facts = parseScript(file.rel, content);
-  return { ...base, hash, lines, secretHints, parsed: true, ...facts };
+  if (SCRIPT_EXTENSIONS.has(ext)) return { ...plain, parsed: true, ...parseScript(file.rel, content) };
+  if (ext === ".cs") {
+    // A parser failure must not drop the file from the graph: it stays a node, just unparsed.
+    const cs = await parseCSharp(content).catch(() => undefined);
+    return cs ? { ...plain, parsed: true, symbols: cs.symbols, envReads: cs.envReads, csharp: cs.links } : plain;
+  }
+  if (PROJECT_EXTENSIONS.has(ext)) return { ...plain, parsed: true, msbuild: parseProjectFile(content) };
+  if (SOLUTION_EXTENSIONS.has(ext)) return { ...plain, parsed: true, msbuild: parseSolution(content) };
+  return plain;
 }
 
 /**
  * Indexes a repository into a code graph. Every file becomes a node; TypeScript and JavaScript
- * files are parsed for symbols, imports and env reads, and imports are resolved to edges.
+ * files are parsed for symbols, imports and env reads, and imports are resolved to edges. C#
+ * files are parsed for types and members, and linked by the types they use; .NET project and
+ * solution files are linked by their project references.
  * Unchanged files are served from `.adam/cache.json`, so re-indexing after an edit is cheap.
  */
 export async function indexRepository(options: IndexOptions): Promise<CodeGraph> {
@@ -140,11 +153,16 @@ export async function indexRepository(options: IndexOptions): Promise<CodeGraph>
   const resolver = new ModuleResolver(root, nodeIds);
   const nodes: GraphNode[] = [];
   const edgesById = new Map<string, GraphEdge>();
+  const dotnet = linkDotnet(
+    [...facts].filter(([, f]) => f.csharp || f.msbuild).map(([rel, f]) => ({ rel, csharp: f.csharp, msbuild: f.msbuild })),
+    nodeIds,
+  );
+  for (const e of dotnet.edges) edgesById.set(e.id, e);
 
   for (const [rel, f] of facts) {
     const reason = sensitiveReason(rel);
-    const packages = new Set<string>();
-    const unresolved = new Set<string>();
+    const packages = new Set<string>(dotnet.packages.get(rel));
+    const unresolved = new Set<string>(dotnet.unresolved.get(rel));
 
     for (const imp of f.imports) {
       const r = resolver.resolve(rel, imp.specifier);
@@ -182,6 +200,7 @@ export async function indexRepository(options: IndexOptions): Promise<CodeGraph>
       envReads: f.envReads,
       envDeclares: f.envDeclares,
       unresolved: [...unresolved].sort(),
+      project: dotnet.project.get(rel),
     });
   }
 

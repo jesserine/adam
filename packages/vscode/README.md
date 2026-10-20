@@ -4,8 +4,8 @@
 node and every import as an edge, so you can see how the code connects, where it is coupled and
 what is disconnected.
 
-> Preview. This first release covers the network view and node panels for TypeScript and
-> JavaScript. Agent proposals, the onboarding report and security overlays are on the way.
+> Preview. This release covers the network view and node panels for TypeScript, JavaScript and
+> C#/.NET. Agent proposals, the onboarding report and security overlays are on the way.
 
 ## What you get
 
@@ -13,6 +13,9 @@ what is disconnected.
   file is a node, whatever its extension. Imports, re-exports, dynamic `import()` and `require`
   calls are edges, resolved through your `tsconfig.json` / `jsconfig.json` paths and across
   monorepo packages. Nodes are coloured by module folder.
+- **C# and .NET.** C# files link to the files whose types they use, resolved through namespaces,
+  usings and project references, plus extension method calls and partial types. Solutions link to
+  their projects and projects to the projects they reference. No .NET SDK needed.
 - **Node panel.** Click a node to see its language, size, what it imports, what imports it, the
   packages and environment variables it uses, and imports that do not resolve.
 - **Functions collapsed by default.** Every function, class, method and type is listed closed.
@@ -21,8 +24,9 @@ what is disconnected.
   The network updates when you save.
 - **Folders view.** The classic tree over the same nodes, one click away, in sync with the
   network selection.
-- **Secrets stay masked.** `.env` files, keys and credentials are sensitive nodes: Adam shows the
-  variable names they declare, never the values. Secret-looking values in ordinary code (API keys,
+- **Secrets stay masked.** `.env` files, `appsettings*.json`, `web.config`, keys and credentials
+  are sensitive nodes: Adam shows the variable names and settings keys they declare, never the
+  values. Secret-looking values in ordinary code (API keys,
   tokens, connection-string passwords) are masked too.
 
 ## Privacy

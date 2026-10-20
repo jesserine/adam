@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CodeGraph, GraphNode } from "@adam/core";
-import { assignClusterSlots, buildTree, clusterOf, fileLabels, Folding, groupFolder, groupId, ROOT_CLUSTER } from "../src/model";
+import { sharedPrefix, assignClusterSlots, buildTree, clusterOf, fileLabels, Folding, colorGroups, groupFolder, groupId, ROOT_CLUSTER } from "../src/model";
 
 const graphOf = (ids: string[]): CodeGraph =>
   ({
@@ -34,8 +34,14 @@ describe("assignClusterSlots", () => {
   });
 
   it("folds clusters beyond the palette into other", () => {
-    const ids = Array.from({ length: 10 }, (_, i) => `f${i}/x`);
-    expect(assignClusterSlots(graphOf(ids)).size).toBe(7);
+    const ids = Array.from({ length: 13 }, (_, i) => `f${i}/x`);
+    expect(assignClusterSlots(graphOf(ids)).size).toBe(10);
+  });
+
+  it("gives tool folders like .github no colour of their own", () => {
+    const slots = assignClusterSlots(graphOf([".github/a", ".github/b", ".github/c", "src/x"]));
+    expect(slots.has(".github")).toBe(false);
+    expect(slots.get("src")).toBe(0);
   });
 });
 
@@ -101,5 +107,51 @@ describe("fileLabels", () => {
     expect(labels.get("packages/ui/src/index.ts")).toBe("ui/…/index.ts");
     expect(labels.get("packages/ui/index.ts")).toBe("ui/index.ts");
     expect(labels.get("index.ts")).toBe("index.ts");
+  });
+});
+
+describe("sharedPrefix", () => {
+  it("finds the dotted prefix most top-level projects share", () => {
+    expect(sharedPrefix(["CPBuild.Domain", "CPBuild.Host", "CPBuild.Shared", ".idea", "docs"])).toBe("CPBuild.");
+    expect(sharedPrefix(["apps/web", "packages/db", "scripts"])).toBe("");
+    expect(sharedPrefix(["A.One", "B.Two", "C.Three"])).toBe("");
+  });
+});
+
+describe("colorGroups", () => {
+  const files = [
+    "apps/web/src/main.tsx",
+    "apps/web/src/lib/a.ts",
+    "apps/web/src/lib/b.ts",
+    "apps/web/src/routes/x.tsx",
+    "apps/web/src/routes/y.tsx",
+    "apps/web/src/routes/z.tsx",
+    "packages/db/index.ts",
+    "packages/db/schema.ts",
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    "README.md",
+  ];
+  const { nodes } = graphOf(files);
+  const folding = new Folding(nodes);
+
+  it("opens the biggest cluster into its subfolders while the groups fit", () => {
+    const { groupOf, counts } = colorGroups(nodes, folding);
+    expect(groupOf.get("apps/web/src/routes/x.tsx")).toBe("apps/web/src/routes");
+    expect(groupOf.get("apps/web/src/lib/a.ts")).toBe("apps/web/src/lib");
+    expect(groupOf.get("apps/web/src/main.tsx")).toBe("apps/web");
+    expect(groupOf.get("packages/db/index.ts")).toBe("packages/db");
+    expect(groupOf.get("README.md")).toBe(ROOT_CLUSTER);
+    expect(counts.get("apps/web/src/routes")).toBe(3);
+  });
+
+  it("never splits tool folders, and stops at the limit unless one group dominates", () => {
+    const { groupOf } = colorGroups(nodes, folding, 3);
+    expect(groupOf.get(".github/workflows/ci.yml")).toBe(".github");
+    // apps/web holds 6 of 9 code files, so it opens past the limit of 3.
+    expect(groupOf.get("apps/web/src/routes/x.tsx")).toBe("apps/web/src/routes");
+    const even = graphOf(["a/x/1", "a/y/1", "b/x/1", "b/y/1", "c/x/1", "c/y/1", "d/x/1", "d/y/1"]).nodes;
+    const groups = colorGroups(even, new Folding(even), 4);
+    expect(groups.groupOf.get("a/x/1")).toBe("a");
   });
 });

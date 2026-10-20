@@ -25,3 +25,14 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** Section titles the user has closed, without their counts, so a section stays closed as the panel re-renders. */
+const closed = new Set<string>();
+
+/** A section that opens and closes from its heading. Each one remembers being closed, by title, until it is opened again. */
+export function collapsible(title: string, props: Partial<Record<string, string>>, ...children: Child[]): HTMLDetailsElement {
+  const key = title.replace(/\s*\(\d[\d,]*\)$/, "");
+  const details = h("details", { ...props, open: !closed.has(key) }, h("summary", {}, h("h3", {}, title)), ...children);
+  details.addEventListener("toggle", () => (details.open ? closed.delete(key) : closed.add(key)));
+  return details;
+}

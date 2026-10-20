@@ -8,7 +8,7 @@ import type {
   ThreatSeverity,
 } from "@adam/core";
 import { getProviderDisplayName, openAiSettingsDialog } from "./ai-settings";
-import { formatBytes, h } from "./dom";
+import { collapsible, formatBytes, h } from "./dom";
 import type { Host } from "./host";
 import type { UnitLink } from "./network";
 
@@ -109,7 +109,13 @@ export function renderNodePanel(container: HTMLElement, node: GraphNode, ctx: Pa
     section(`Imports (${ctx.outgoing.length})`, edgeList(ctx.outgoing, "target", ctx)),
     section(`Imported by (${ctx.incoming.length})`, edgeList(ctx.incoming, "source", ctx)),
   );
-  if (node.packages.length) container.append(section(`Packages (${node.packages.length})`, tagList(node.packages)));
+  if (node.project) {
+    container.append(section("Project", h("button", { class: "link", onclick: () => ctx.onSelect(node.project!) }, node.project)));
+  }
+  if (node.packages.length) {
+    const title = node.language === "csharp" ? "Namespaces from outside the repo" : "Packages";
+    container.append(section(`${title} (${node.packages.length})`, tagList(node.packages)));
+  }
   if (node.envReads.length) container.append(section(`Reads env (${node.envReads.length})`, tagList(node.envReads)));
   if (node.unresolved.length) {
     container.append(
@@ -186,7 +192,7 @@ function tagList(items: string[], tone = ""): HTMLElement {
 }
 
 function section(title: string, content: HTMLElement, hint?: string): HTMLElement {
-  return h("section", { class: "panel-section" }, h("h3", {}, title), hint ? h("p", { class: "muted small" }, hint) : null, content);
+  return collapsible(title, { class: "panel-section" }, hint ? h("p", { class: "muted small" }, hint) : null, content);
 }
 
 interface GroupPanelContext {
@@ -196,6 +202,8 @@ interface GroupPanelContext {
   incoming: UnitLink[];
   onExpand: () => void;
   onSelect: (id: string) => void;
+  /** Replaces the Expand folder button, such as View in network in the Folders view. */
+  primary?: HTMLElement;
   actions?: HTMLElement[];
 }
 
@@ -220,7 +228,7 @@ export function renderGroupPanel(container: HTMLElement, ctx: GroupPanelContext)
       h(
         "div",
         { class: "panel-actions" },
-        h("button", { class: "primary", onclick: ctx.onExpand, title: "Show this folder's files and subfolders (or double-click it)" }, "Expand folder"),
+        ctx.primary ?? h("button", { class: "primary", onclick: ctx.onExpand, title: "Show this folder's files and subfolders (or double-click it)" }, "Expand folder"),
         ...(ctx.actions ?? []),
       ),
     ),

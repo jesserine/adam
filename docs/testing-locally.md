@@ -58,17 +58,27 @@ Open any project folder and run **Adam: Open Network View**. To remove it later,
 
 ## What to check
 
-- **Network:** every file is a dot, imports are lines, colours are module folders (legend at the
-  bottom left). Scroll to zoom, drag to pan, **Fit** to frame what is on screen.
-- **Clusters:** a repo with more than 150 files opens collapsed, one ringed node per package or
-  module folder (`apps/web · 180`), with lines summed between them. Double-click a cluster, or
-  **Expand folder** in its panel, to open it into its subfolders and files; **Collapse folder** on
+- **Network:** every file is a dot, imports are faint curved lines, and colours are groups of
+  folders. A node's size follows how many links it has, and only the busiest files are
+  labelled. Scroll to zoom, drag to pan, and use **Fit** to frame what is on screen.
+- **Sidebar:** search at the top, then the inspected node, then **Groups**. Each group shows its
+  colour and file count; untick a group to hide it, or untick **Show all** to hide them all.
+- **Clusters:** a repo with more than 150 files opens collapsed, with one node per colour group
+  (`excalidraw/components/ · 309`) and lines summed between them. Double-click a folder, or
+  **Expand folder** in its panel, to open it into its subfolders and files. **Collapse folder** on
   any node inside folds it back. **Expand all** and **Collapse all** are in the toolbar.
+- **Viewing a folder:** opening a folder zooms to its files and fades everything it does not
+  connect to. The bar at the top shows the path you took (`All › routes/_app/ › _app/products/`):
+  click a crumb, **Back** or Esc to return to that step. Unticking a group hides its nodes even
+  while you are inside one of its folders.
+- **Spacing:** every group sits in its own area with its name above it, every subfolder in its
+  own clump inside, and labels never cover another node.
 - **Hover a node:** its links light up and the rest fades, until the pointer leaves.
 - **Click a node (focus):** its links stay lit and a bar at the top says what is focused. Bright
   arrows are imports, grey ones are imported-by. While focused, clicking any other node only
   opens its panel (its link to the focus is drawn thicker); the lit links do not change. Click the
-  empty canvas, press Esc or **Clear focus** to unfocus.
+  empty canvas, press Esc or **Clear focus** to unfocus; any folder opened while focused (for
+  example, focus a group, then expand it) folds back.
 - **Panel:** for a file, language, size, imports, imported-by, packages and env variables it
   reads. For a folder, its size, the folders it imports from and is imported by (with counts),
   and its files.
@@ -78,7 +88,12 @@ Open any project folder and run **Adam: Open Network View**. To remove it later,
   example add an import) and the network updates within a second.
 - **Secrets:** click a `.env` file. You should see variable names with `••••••••` instead of
   values. Opening it in the editor asks first.
-- **Folders:** the **Folders** tab shows the usual tree over the same nodes.
+- **Folders:** the **Folders** tab shows the usual tree over the same nodes. Click a file to see
+  the same details as in the network (info, symbols, imports, imported by, project), or a folder
+  to see its imports by folder and its files. The sidebar has no Groups here. **View in network**
+  switches to the network with the file focused or the folder opened.
+- **Sidebar sections:** every heading (Node info, Groups, Imports, Imported by, Symbols, …)
+  folds its section away when clicked, and it stays folded until opened again.
 - **Filters and search:** "Hide unconnected", "Hide type-only imports", and the search box
   (file name, path or function name, then Enter).
 

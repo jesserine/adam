@@ -21,11 +21,19 @@ Phase 0 slice, working end to end:
   click around its neighbours.
 - Node panel with symbols collapsed by default; open one to read only its code, or jump to the
   editor to change it by hand.
-- Sensitive nodes masked (`.env` shows names, never values) and secret-looking values redacted.
+- C# and .NET: classes, records, interfaces, methods and properties as symbols; edges from the
+  types each file uses (through namespaces, usings, aliases and project references), extension
+  method calls and partial types; `.sln`/`.slnx` → project and `<ProjectReference>` edges;
+  NuGet packages on project nodes. dotnet/eShop (547 C# files) indexes in about 1.6 s cold and
+  0.4 s warm.
+- Sensitive nodes masked (`.env` and `appsettings*.json` show keys, never values) and
+  secret-looking values redacted, including ADO.NET connection string passwords.
 - Incremental cache in `.adam/`: Excalidraw (1,318 files) indexes in about 1.8 s cold and 0.2 s
   warm.
 
 ![Node panel with collapsed symbols](docs/images/node-panel.png)
+
+![A C# node from dotnet/eShop with its type references](docs/images/csharp-node-panel.png)
 
 ## Try it
 

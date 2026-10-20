@@ -5,8 +5,10 @@
   "description": "Adam's network view. Runs in a VS Code webview or a browser, against any host that implements the transport.",
   "main": "src/main.ts",
   "dependencies": {
+    "@sigma/node-border": "^3.0.0",
     "graphology": "^0.25.4",
     "graphology-layout-forceatlas2": "^0.10.1",
+    "graphology-layout-noverlap": "^0.4.2",
     "sigma": "^3.0.3"
   }
 }

@@ -70,7 +70,7 @@ export const AI_PROVIDER_METADATA: Record<AiProvider, AiProviderMeta> = {
   gemini: {
     id: "gemini",
     name: "Google Gemini",
-    description: "Gemini 3.8 Flash, 3.7 Flash, 3.1 Pro, and 2.5 Pro reasoning models",
+    description: "Current Gemini models for code analysis and tool calling",
     placeholder: "AQ... or AIza...",
     keyPrefixHint: "AQ. or AIza",
     consoleUrl: "https://aistudio.google.com/app/apikey",

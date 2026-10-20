@@ -176,6 +176,12 @@ describe("content access", () => {
     expect(code.content).toBe("start(): void {\n  this.app.listen(this.port);\n}");
   });
 
+  it("handles Windows line endings", async () => {
+    fs.writeFileSync(path.join(root, "src/crlf.ts"), "export function a() {\r\n  return 1;\r\n}\r\n");
+    const g = await indexRepository({ root, cacheDir: false });
+    expect(readSymbolCode(root, node(g, "src/crlf.ts"), "a").content).toBe("export function a() {\n  return 1;\n}");
+  });
+
   it("refuses nodes that point outside the repository", async () => {
     const g = await indexRepository({ root, cacheDir: false });
     const evil = { ...node(g, "README.md"), id: "../../etc/passwd" };

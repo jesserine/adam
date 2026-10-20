@@ -46,7 +46,7 @@ export function readSymbolCode(root: string, node: GraphNode, symbolId: string):
   if (!symbol) throw new Error(`No symbol ${symbolId} in ${node.id}`);
   const whole = readNodeContent(root, node);
   if (whole.masked) return { ...whole, symbol };
-  const lines = whole.content.split("\n").slice(symbol.start.line - 1, symbol.end.line);
+  const lines = whole.content.split(/\r?\n/).slice(symbol.start.line - 1, symbol.end.line);
   return { content: dedent(lines).join("\n"), masked: false, redactions: whole.redactions, symbol };
 }
 

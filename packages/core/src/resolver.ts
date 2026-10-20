@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import ts from "typescript";
 
@@ -29,11 +30,16 @@ interface ConfigEntry {
 export class ModuleResolver {
   private readonly configByDir = new Map<string, string | undefined>();
   private readonly entries = new Map<string, ConfigEntry>();
+  /** TypeScript reports resolved files by real path, so a root reached through a symlink
+   *  (for example macOS's /var → /private/var) must be matched both ways. */
+  private readonly realRoot: string;
 
   constructor(
     private readonly root: string,
     private readonly nodeIds: ReadonlySet<string>,
-  ) {}
+  ) {
+    this.realRoot = fs.realpathSync.native(root);
+  }
 
   resolve(fromRel: string, specifier: string): Resolution {
     const fromAbs = path.join(this.root, fromRel);
@@ -64,9 +70,11 @@ export class ModuleResolver {
   }
 
   private toNodeId(abs: string): string | undefined {
-    const rel = path.relative(this.root, abs).split(path.sep).join("/");
-    if (rel.startsWith("..") || path.isAbsolute(rel)) return undefined;
-    return this.nodeIds.has(rel) ? rel : undefined;
+    for (const base of this.root === this.realRoot ? [this.root] : [this.root, this.realRoot]) {
+      const rel = path.relative(base, abs).split(path.sep).join("/");
+      if (!rel.startsWith("..") && !path.isAbsolute(rel) && this.nodeIds.has(rel)) return rel;
+    }
+    return undefined;
   }
 
   private entryFor(dir: string): ConfigEntry {

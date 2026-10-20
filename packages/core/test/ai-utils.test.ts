@@ -148,6 +148,26 @@ describe("probeAiProviderKey", () => {
     }
   });
 
+  it("sends Gemini API keys in a header, not the URL", async () => {
+    const originalFetch = global.fetch;
+    let capturedUrl = "";
+    let capturedHeaders: Record<string, string> = {};
+    global.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      capturedUrl = url;
+      capturedHeaders = init?.headers as Record<string, string>;
+      return { ok: true, status: 200, json: async () => ({ models: [] }) } as unknown as Response;
+    });
+    try {
+      const res = await probeAiProviderKey("gemini", "AQ.fakeGeminiKey12345");
+      expect(res.ok).toBe(true);
+      expect(capturedUrl).toBe("https://generativelanguage.googleapis.com/v1beta/models");
+      expect(capturedUrl).not.toContain("AQ.fakeGeminiKey12345");
+      expect(capturedHeaders["x-goog-api-key"]).toBe("AQ.fakeGeminiKey12345");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it("handles network failure or timeout gracefully", async () => {
     const originalFetch = global.fetch;
     global.fetch = vi.fn().mockRejectedValue(new Error("Network connection refused"));

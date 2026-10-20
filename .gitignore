@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.vsix
+.adam/
+coverage/
+.DS_Store
+packages/vscode/LICENSE.md

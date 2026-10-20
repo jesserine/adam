@@ -1,0 +1,12 @@
+{
+  "name": "@adam/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Adam's UI-agnostic core: walks a repository and builds its code graph (nodes, symbols, edges).",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "ignore": "^7.0.5",
+    "typescript": "~5.9.3"
+  }
+}

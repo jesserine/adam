@@ -1,0 +1,12 @@
+{
+  // Comments are allowed, as in real tsconfig files.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] }
+  }
+}

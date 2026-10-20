@@ -1,0 +1,467 @@
+/* Colours come from the VS Code theme when running in a webview, with fallbacks for the browser. */
+:root {
+  --bg: var(--vscode-editor-background, #fbfbf9);
+  --bg-2: var(--vscode-sideBar-background, #f2f1ed);
+  --fg: var(--vscode-foreground, #1f1f1d);
+  --muted: var(--vscode-descriptionForeground, #6b6a64);
+  --border: var(--vscode-panel-border, #dcdbd5);
+  --accent: var(--vscode-button-background, #2a78d6);
+  --accent-fg: var(--vscode-button-foreground, #ffffff);
+  --input-bg: var(--vscode-input-background, #ffffff);
+  --input-fg: var(--vscode-input-foreground, #1f1f1d);
+  --link: var(--vscode-textLink-foreground, #1c5cab);
+  --code-bg: var(--vscode-textCodeBlock-background, #f2f1ed);
+  --danger: #c93838;
+  --warn: #9a6400;
+  --font: var(--vscode-font-family, system-ui, -apple-system, "Segoe UI", sans-serif);
+  --mono: var(--vscode-editor-font-family, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: var(--vscode-editor-background, #1a1a19);
+    --bg-2: var(--vscode-sideBar-background, #222220);
+    --fg: var(--vscode-foreground, #f0efec);
+    --muted: var(--vscode-descriptionForeground, #a3a29a);
+    --border: var(--vscode-panel-border, #3a3a37);
+    --input-bg: var(--vscode-input-background, #2a2a28);
+    --input-fg: var(--vscode-input-foreground, #f0efec);
+    --link: var(--vscode-textLink-foreground, #86b6ef);
+    --code-bg: var(--vscode-textCodeBlock-background, #262624);
+    --danger: #ef7d7d;
+    --warn: #e0b04a;
+    color-scheme: dark;
+  }
+}
+
+body.vscode-dark,
+body.vscode-high-contrast {
+  --danger: #ef7d7d;
+  --warn: #e0b04a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.tabs {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tab {
+  background: transparent;
+  border: 0;
+  padding: 4px 10px;
+}
+
+.tab.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.toolbar input[type="search"] {
+  min-width: 220px;
+  flex: 0 1 320px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-fg);
+}
+
+.filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+}
+
+.stats {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.network {
+  position: absolute;
+  inset: 0;
+}
+
+.legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  max-width: calc(100% - 24px);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-item i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.tree {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 12px 16px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.tree > ul {
+  padding-left: 0;
+}
+
+.tree summary {
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.tree-file {
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  border-radius: 3px;
+  text-align: left;
+}
+
+.tree-file:hover,
+.tree-file.selected {
+  background: var(--code-bg);
+}
+
+.tree-file.selected {
+  outline: 1px solid var(--accent);
+}
+
+.panel {
+  width: min(440px, 45vw);
+  border-left: 1px solid var(--border);
+  overflow: auto;
+  background: var(--bg);
+  padding: 14px 16px 24px;
+}
+
+.panel-head {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-size: 16px;
+  font-weight: 650;
+  word-break: break-all;
+}
+
+.panel-path {
+  font-family: var(--mono);
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.panel-head .primary {
+  justify-self: start;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 0;
+  border-radius: 4px;
+  padding: 5px 12px;
+}
+
+.chips,
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip,
+.tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.tag {
+  font-family: var(--mono);
+  border-radius: 4px;
+}
+
+.danger {
+  color: var(--danger);
+  border-color: currentColor;
+}
+
+.warn {
+  color: var(--warn);
+  border-color: currentColor;
+}
+
+.notice {
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 12px 0 0;
+}
+
+.panel-section {
+  margin-top: 16px;
+}
+
+.panel-section h3 {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+  margin: 0;
+}
+
+.small {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.symbols {
+  display: grid;
+  gap: 2px;
+}
+
+.symbols.nested {
+  margin-top: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.symbol > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.symbol > summary::-webkit-details-marker {
+  display: none;
+}
+
+.symbol > summary::before {
+  content: "▸";
+  color: var(--muted);
+  width: 10px;
+}
+
+.symbol[open] > summary::before {
+  content: "▾";
+}
+
+.symbol > summary:hover {
+  background: var(--code-bg);
+}
+
+.kind {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 56px;
+}
+
+.symbol-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exported {
+  font-size: 10.5px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.line {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.signature {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 6px 6px 24px;
+  word-break: break-word;
+}
+
+.symbol-body {
+  padding: 0 0 8px 24px;
+}
+
+.code {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+  max-height: 420px;
+  tab-size: 2;
+}
+
+.link {
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--link);
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.symbol-body > .link {
+  margin-top: 6px;
+  font-family: var(--font);
+}
+
+.edges {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.edge-kind {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+@media (max-width: 700px) {
+  .main {
+    flex-direction: column;
+  }
+
+  .panel {
+    width: 100%;
+    max-height: 55vh;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}

@@ -69,50 +69,16 @@ describe("Host threat analysis wiring", () => {
     expect(report.overallRisk).toBe("info");
   });
 
-  it("wires analyzeNodeThreats in createBrowserHost", async () => {
+  it("does not expose AI features from createBrowserHost", async () => {
     (globalThis as any).location = { hash: "#token=test-token-123" };
-
-    let capturedUrl = "";
-    let capturedInit: RequestInit | undefined;
-
-    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
-      capturedUrl = url;
-      capturedInit = init;
-      return {
-        ok: true,
-        json: async () => ({
-          nodeId: "src/server.ts",
-          provider: "gemini",
-          model: "gemini-3.8-flash",
-          analyzedAt: new Date().toISOString(),
-          summary: "Threat found",
-          threats: [
-            {
-              id: "THREAT-1",
-              title: "Path Traversal",
-              category: "injection",
-              severity: "high",
-              description: "User input reaches fs.readFile",
-              recommendation: "Validate path",
-            },
-          ],
-          overallRisk: "high",
-          masked: false,
-          redactions: 0,
-        }),
-      } as unknown as Response;
-    });
-
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy;
     const host = createBrowserHost();
     expect(host.kind).toBe("browser");
-
-    const report = await host.analyzeNodeThreats({ nodeId: "src/server.ts" });
-
-    expect(capturedUrl).toBe("/api/ai/threats");
-    expect(capturedInit?.method).toBe("POST");
-    expect((capturedInit?.headers as Record<string, string>)?.["Authorization"]).toBe("Bearer test-token-123");
-    expect(JSON.parse(capturedInit?.body as string)).toEqual({ nodeId: "src/server.ts" });
-    expect(report.nodeId).toBe("src/server.ts");
-    expect(report.overallRisk).toBe("high");
-  });
+    await expect(host.getAiConfig()).rejects.toThrow("AI features are available in the VS Code extension only.");
+    await expect(host.analyzeNodeThreats({ nodeId: "src/server.ts" })).rejects.toThrow(
+      "AI features are available in the VS Code extension only.",
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });;
 });

@@ -64,6 +64,9 @@ Open any project folder and run **Adam: Open Network View**. To remove it later,
   module folder (`apps/web · 180`), with lines summed between them. Double-click a cluster, or
   **Expand folder** in its panel, to open it into its subfolders and files; **Collapse folder** on
   any node inside folds it back. **Expand all** and **Collapse all** are in the toolbar.
+- **Regions:** every cluster sits in its own circle, with its folders as circles inside it and
+  the most connected files at their centre. Opening a cluster zooms to its circle and fades
+  everything it does not connect to; a bar says "Viewing …". **Show all** or Esc goes back.
 - **Hover a node:** its links light up and the rest fades, until the pointer leaves.
 - **Click a node (focus):** its links stay lit and a bar at the top says what is focused. Bright
   arrows are imports, grey ones are imported-by. While focused, clicking any other node only

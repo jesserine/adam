@@ -19,6 +19,7 @@ const state = {
   graph: undefined as CodeGraph | undefined,
   adj: undefined as ReturnType<typeof adjacency> | undefined,
   focus: undefined as string | undefined,
+  viewing: undefined as string | undefined,
   /** The node or folder whose panel is open. */
   selected: undefined as string | undefined,
   view: "network" as "network" | "folders",
@@ -79,7 +80,7 @@ search.addEventListener("keydown", (e) => {
   if (e.key === "Enter") findNode(search.value);
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !(e.target instanceof HTMLInputElement)) network.clearFocus();
+  if (e.key === "Escape" && !(e.target instanceof HTMLInputElement)) network.back();
 });
 
 // Behaviour ----------------------------------------------------------------------------------
@@ -107,6 +108,7 @@ function select(id: string): void {
 function onNetworkChange(next: NetworkState): void {
   const changed = next.inspected !== state.selected || next.focus !== state.focus;
   state.focus = next.focus;
+  state.viewing = next.viewing;
   state.selected = next.inspected;
   renderFocusBar();
   if (changed) renderPanel();
@@ -114,8 +116,17 @@ function onNetworkChange(next: NetworkState): void {
 }
 
 function renderFocusBar(): void {
-  focusBar.hidden = !state.focus || state.view !== "network";
-  if (!state.focus) return;
+  focusBar.hidden = !(state.focus || state.viewing) || state.view !== "network";
+  if (!state.focus) {
+    if (state.viewing) {
+      focusBar.replaceChildren(
+        h("span", {}, "Viewing ", h("strong", {}, state.viewing)),
+        h("span", { class: "hint" }, "Anything it does not connect to is dimmed."),
+        h("button", { class: "ghost", onclick: () => network.back(), title: "Stop viewing (Esc)" }, "Show all"),
+      );
+    }
+    return;
+  }
   focusBar.replaceChildren(
     h("span", {}, "Focused on ", h("strong", {}, network.labelOf(state.focus))),
     h("span", { class: "hint" }, h("i", { class: "arrow-out" }), "imports"),

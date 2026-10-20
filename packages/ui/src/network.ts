@@ -1,8 +1,6 @@
-import type { CodeGraph, GraphEdge } from "@adam/core";
+import type { CodeGraph } from "@adam/core";
 import { createNodeBorderProgram } from "@sigma/node-border";
 import Graph from "graphology";
-import forceAtlas2 from "graphology-layout-forceatlas2";
-import noverlap from "graphology-layout-noverlap";
 import Sigma from "sigma";
 import type { NodeHoverDrawingFunction, NodeLabelDrawingFunction } from "sigma/rendering";
 import {
@@ -13,8 +11,13 @@ import {
   fileLabels,
   Folding,
   groupFolder,
+  groupId,
   isGroupId,
+  isToolFolder,
+  sharedPrefix,
   OTHER_COLOR,
+  packRegions,
+  type Region,
   SENSITIVE_COLOR,
 } from "./model";
 
@@ -25,9 +28,13 @@ export interface NetworkFilters {
 
 export type Theme = "light" | "dark";
 
-/** What the view is showing: the focus (by label), whose links stay on screen, and the unit whose panel is open. */
+/**
+ * What the view is showing: the focus (by label), whose links stay on screen; the folder being
+ * viewed (the last one opened), which keeps what it connects to bright; and the open panel.
+ */
 export interface NetworkState {
   focus: string | undefined;
+  viewing: string | undefined;
   inspected: string | undefined;
 }
 
@@ -42,10 +49,14 @@ export interface UnitLink {
 const COLLAPSE_ABOVE = 150;
 
 interface Lit {
+  /** Focus and hover light a node's links; viewing an opened folder dims what it does not touch. */
+  mode: "focus" | "view";
   units: Set<string>;
   neighbours: Set<string>;
   /** On-screen edges that touch the lit files, and which way they point. */
-  edges: Map<string, "out" | "in">;
+  edges: Map<string, "out" | "in" | "view">;
+  /** Folders whose region holds a lit or neighbouring node; the rest are dimmed. */
+  folders: Set<string>;
 }
 
 /**
@@ -63,17 +74,22 @@ export class NetworkView {
   private expanded = new Set<string>();
   /** Positions from one layout of every file, so opening a folder never moves anything else. */
   private positions = new Map<string, { x: number; y: number }>();
-  /** Width of the laid-out graph, to turn node sizes (pixels) into layout units. */
-  private extent = 1;
+  /** The circle each cluster and folder occupies, drawn under the graph. */
+  private regions = new Map<string, Region>();
+  private regionCanvas: HTMLCanvasElement;
   private labels = new Map<string, string>();
+  /** A dotted prefix most clusters share (`CPBuild.`), left off folder labels on the canvas. */
+  private prefix = "";
   private unitOfFile = new Map<string, string>();
   private slots = new Map<string, number>();
   private filters: NetworkFilters = { hideUnconnected: false, hideTypeOnly: false };
 
   private focusFiles: Set<string> | undefined;
   private focusLabel: string | undefined;
+  private viewing: { folder: string; files: Set<string> } | undefined;
   private inspected: string | undefined;
   private hovered: string | undefined;
+  private labelQueue: Array<{ text: string; x: number; y: number; rank: number; size: number; color?: string; center?: boolean }> = [];
   private lit: Lit | undefined;
   /** A click on a folder waits out the double-click window, so a double-click only opens the folder. */
   private pendingClick: ReturnType<typeof setTimeout> | undefined;
@@ -88,7 +104,7 @@ export class NetworkView {
     this.sigma = new Sigma(this.graph, container, {
       defaultEdgeType: "line",
       renderEdgeLabels: false,
-      labelRenderedSizeThreshold: 8,
+      labelRenderedSizeThreshold: 5,
       labelDensity: 0.6,
       labelGridCellSize: 120,
       labelFont: "system-ui, -apple-system, Segoe UI, sans-serif",
@@ -112,6 +128,11 @@ export class NetworkView {
         if (node === this.inspected) Object.assign(res, { highlighted: true, forceLabel: true, zIndex: 3 });
         const lit = this.lit;
         if (!lit) return res;
+        if (lit.mode === "view" && (lit.units.has(node) || lit.neighbours.has(node))) return res;
+        if (lit.mode === "view" && node !== this.inspected) {
+          const faded = this.faded();
+          return { ...res, color: faded, borderColor: faded, label: "", size: (data.size as number) * 0.7, zIndex: 0 };
+        }
         if (lit.units.has(node)) return { ...res, highlighted: true, forceLabel: true, zIndex: 2 };
         // Up to a few dozen neighbours all get labels; past that, Sigma's label grid picks which fit.
         if (lit.neighbours.has(node)) return { ...res, forceLabel: res.forceLabel || lit.neighbours.size <= 30, zIndex: Math.max(res.zIndex ?? 0, 1) };
@@ -125,6 +146,7 @@ export class NetworkView {
         if (!lit) return data;
         const dir = lit.edges.get(edge);
         if (!dir) return { ...data, hidden: true };
+        if (dir === "view") return data;
         const [s, t] = this.graph.extremities(edge);
         const strong = this.inspected !== undefined && !lit.units.has(this.inspected) && (s === this.inspected || t === this.inspected);
         return {
@@ -147,7 +169,13 @@ export class NetworkView {
       clearTimeout(this.pendingClick);
       if (isGroupId(node)) this.toggle(node);
     });
-    this.sigma.on("clickStage", () => this.clearFocus());
+    this.sigma.on("clickStage", () => this.back());
+    this.regionCanvas = this.sigma.createCanvas("regions", { beforeLayer: "edges" });
+    this.sigma.on("beforeRender", () => (this.labelQueue = []));
+    this.sigma.on("afterRender", () => {
+      this.drawRegions();
+      this.drawLabels();
+    });
     this.sigma.on("enterNode", ({ node }) => {
       container.style.cursor = "pointer";
       this.hovered = node;
@@ -167,6 +195,7 @@ export class NetworkView {
     this.adj = adjacency(data);
     this.folding = new Folding(data.nodes);
     this.labels = fileLabels(data.nodes.map((n) => n.id));
+    this.prefix = sharedPrefix([...new Set(data.nodes.map(clusterOf))]);
     this.slots = assignClusterSlots(data, this.slots);
     if (firstLoad && data.nodes.length <= COLLAPSE_ABOVE) this.expanded = new Set(this.folding.folders());
     this.layout();
@@ -208,14 +237,29 @@ export class NetworkView {
     this.emit();
   }
 
-  /** Opens a collapsed folder, or closes the folder a node sits in. */
+  /** One step back, like Esc or a click on empty space: first the focus, then the folder being viewed. */
+  back(): void {
+    if (this.focusFiles || this.inspected) return this.clearFocus();
+    if (!this.viewing) return;
+    this.viewing = undefined;
+    this.relight();
+    this.emit();
+  }
+
+  /** Opens a collapsed folder and views it, or closes the folder a node sits in. */
   toggle(unit: string): void {
-    if (isGroupId(unit)) this.expanded.add(groupFolder(unit));
-    else {
-      const parent = this.folding.parentOf(unit);
-      if (parent === undefined) return;
-      for (const f of [...this.expanded]) if (f === parent || f.startsWith(`${parent}/`)) this.expanded.delete(f);
+    if (isGroupId(unit)) {
+      const folder = groupFolder(unit);
+      this.expanded.add(folder);
+      this.viewing = { folder, files: new Set(this.folding.membersOf(folder)) };
+      this.rebuild();
+      this.frameRegion(folder);
+      return;
     }
+    const parent = this.folding.parentOf(unit);
+    if (parent === undefined) return;
+    for (const f of [...this.expanded]) if (f === parent || f.startsWith(`${parent}/`)) this.expanded.delete(f);
+    if (this.viewing && (this.viewing.folder === parent || this.viewing.folder.startsWith(`${parent}/`))) this.viewing = undefined;
     this.rebuild();
   }
 
@@ -226,12 +270,14 @@ export class NetworkView {
 
   expandAll(): void {
     this.expanded = new Set(this.folding.folders());
+    this.viewing = undefined;
     this.rebuild();
     this.fit();
   }
 
   collapseAll(): void {
     this.expanded.clear();
+    this.viewing = undefined;
     this.rebuild();
     this.fit();
   }
@@ -263,8 +309,9 @@ export class NetworkView {
 
   /** A cluster by its full path (`packages/ui`); a folder inside one from the cluster's own name (`ui/components`). */
   private groupName(folder: string, cluster: string): string {
-    if (folder === cluster) return folder;
-    return `${cluster.split("/").at(-1)}${folder.slice(cluster.length)}`;
+    const name = this.prefix && cluster.startsWith(this.prefix) ? cluster.slice(this.prefix.length) : cluster;
+    if (folder === cluster) return name;
+    return `${name.split("/").at(-1)}${folder.slice(cluster.length)}`;
   }
 
   /** Frames what is on screen now, which for a collapsed repo is much less than the whole layout. */
@@ -275,10 +322,24 @@ export class NetworkView {
       if (!d) return;
       [minX, maxX, minY, maxY] = [Math.min(minX, d.x), Math.max(maxX, d.x), Math.min(minY, d.y), Math.max(maxY, d.y)];
     });
+    if (!Number.isFinite(minX)) return void this.sigma.getCamera().animatedReset({ duration: animate ? 300 : 0 });
+    this.frame(minX, maxX, minY, maxY, animate);
+  }
+
+  /** Moves the camera onto a folder's region, the way opening a ring does in the Monday graph. */
+  private frameRegion(folder: string): void {
+    const r = this.regions.get(folder);
+    if (!r) return;
+    const toFramed = (x: number, y: number) => this.sigma.viewportToFramedGraph(this.sigma.graphToViewport({ x, y }));
+    const a = toFramed(r.x - r.r, r.y - r.r);
+    const b = toFramed(r.x + r.r, r.y + r.r);
+    this.frame(Math.min(a.x, b.x), Math.max(a.x, b.x), Math.min(a.y, b.y), Math.max(a.y, b.y), true);
+  }
+
+  private frame(minX: number, maxX: number, minY: number, maxY: number, animate: boolean): void {
     const camera = this.sigma.getCamera();
-    if (!Number.isFinite(minX)) return void camera.animatedReset({ duration: animate ? 300 : 0 });
-    const state = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, ratio: Math.min(3, Math.max(0.1, Math.max(maxX - minX, maxY - minY) * 1.25)) };
-    if (animate) void camera.animate(state, { duration: 300 });
+    const state = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, ratio: Math.min(3, Math.max(0.05, Math.max(maxX - minX, maxY - minY) * 1.35)) };
+    if (animate) void camera.animate(state, { duration: 400 });
     else camera.setState(state);
   }
 
@@ -313,44 +374,17 @@ export class NetworkView {
 
   // Building the view --------------------------------------------------------------------------
 
-  /** One force layout over every file; folders sit at the middle of their files. */
+  /** Lays files out by region (see packRegions); folders sit at the middle of their region. */
   private layout(): void {
-    const g = new Graph({ multi: false, type: "directed" });
-    const clusters = [...new Set(this.data.nodes.map(clusterOf))].sort();
-    this.data.nodes.forEach((n, i) => {
-      // New nodes start on a ring per cluster, so the layout begins already grouped.
-      const angle = (clusters.indexOf(clusterOf(n)) / Math.max(1, clusters.length)) * 2 * Math.PI;
-      g.addNode(n.id, this.positions.get(n.id) ?? {
-        x: Math.cos(angle) * 100 + ((i * 7919) % 37) - 18,
-        y: Math.sin(angle) * 100 + ((i * 104729) % 37) - 18,
-      });
-    });
-    for (const e of this.data.edges) if (!g.hasEdge(e.source, e.target)) g.addDirectedEdge(e.source, e.target);
-
-    const fresh = this.data.nodes.filter((n) => !this.positions.has(n.id)).length;
-    if (g.order > 1 && fresh > 0) {
-      const n = g.order;
-      const iterations = this.positions.size ? 60 : n < 500 ? 300 : n < 3000 ? 150 : 60;
-      forceAtlas2.assign(g, {
-        iterations,
-        settings: {
-          ...forceAtlas2.inferSettings(g),
-          // LinLog pulls tightly coupled modules into visible clumps instead of one hairball.
-          linLogMode: true,
-          barnesHutOptimize: n > 1000,
-        },
-      });
-    }
-    this.positions = new Map();
-    let [minX, maxX, minY, maxY] = [Infinity, -Infinity, Infinity, -Infinity];
-    g.forEachNode((id, a) => {
-      const p = { x: a.x as number, y: a.y as number };
-      this.positions.set(id, p);
-      [minX, maxX, minY, maxY] = [Math.min(minX, p.x), Math.max(maxX, p.x), Math.min(minY, p.y), Math.max(maxY, p.y)];
-    });
+    const degree = (id: string) => (this.adj.incoming.get(id)?.length ?? 0) + (this.adj.outgoing.get(id)?.length ?? 0);
+    const packed = packRegions(
+      this.data.nodes.map((n) => ({ id: n.id, weight: degree(n.id) })),
+      this.folding,
+    );
+    this.positions = packed.positions;
+    this.regions = packed.regions;
     // Fixed framing: opening or closing a folder must not rescale the whole picture.
-    if (g.order) this.sigma.setCustomBBox({ x: [minX, maxX], y: [minY, maxY] });
-    this.extent = Math.max(1, maxX - minX, maxY - minY);
+    if (this.data.nodes.length) this.sigma.setCustomBBox({ x: [0, packed.size], y: [0, packed.size] });
   }
 
   /** Rebuilds what is on screen from the files, the open folders and the layout. */
@@ -366,7 +400,6 @@ export class NetworkView {
 
     const byId = new Map(this.data.nodes.map((n) => [n.id, n]));
     const degree = (id: string) => (this.adj.incoming.get(id)?.length ?? 0) + (this.adj.outgoing.get(id)?.length ?? 0);
-    const groups = [...members.keys()].some(isGroupId);
 
     for (const [unit, files] of members) {
       if (!isGroupId(unit)) {
@@ -375,57 +408,43 @@ export class NetworkView {
         this.graph.addNode(unit, {
           ...this.positions.get(unit),
           label: n.sensitive ? `🔒 ${this.labelOf(unit)}` : this.labelOf(unit),
-          size: 2 + Math.min(10, Math.log2(1 + degree(unit)) * 1.6),
+          // Kept small: files are packed at even spacing, so big hubs would cover their neighbours.
+          size: 2 + Math.min(5, Math.log2(1 + degree(unit))),
           cluster,
           connected: degree(unit) > 0,
           color: this.colorFor(cluster, n.sensitive),
         });
         continue;
       }
-      let x = 0;
-      let y = 0;
-      for (const f of files) {
-        x += this.positions.get(f)!.x;
-        y += this.positions.get(f)!.y;
-      }
+      const region = this.regions.get(groupFolder(unit))!;
       const cluster = clusterOf(byId.get(files[0])!);
       const color = this.colorFor(cluster, false);
-      // Folders are the landmarks, so they always keep their label.
+      const tool = isToolFolder(cluster);
+      // Folders are the landmarks, so they always ask for a label; drawLabels() decides which fit.
       this.graph.addNode(unit, {
-        x: x / files.length,
-        y: y / files.length,
+        x: region.x,
+        y: region.y,
         type: "folder",
         label: `${this.groupName(groupFolder(unit), cluster)}/ · ${files.length}`,
-        size: Math.min(26, 6 + Math.sqrt(files.length) * 1.6),
+        size: tool ? 5 : Math.min(26, 6 + Math.sqrt(files.length) * 1.6),
         cluster,
+        tool,
         connected: files.some((f) => degree(f) > 0),
-        color: this.mix(color, 0.35),
-        borderColor: color,
+        color: this.mix(color, tool ? 0.15 : 0.35),
+        borderColor: tool ? this.mix(color, 0.5) : color,
         forceLabel: true,
-        zIndex: 1,
+        zIndex: tool ? 0 : 1,
       });
     }
 
-    // Folders sit at the middle of their files, which can land them on top of each other or of
-    // other nodes. A light overlap pass pushes them apart without redoing the layout.
-    // Folders count with their label (drawn to the right), so folder names do not collide either.
-    if (groups && this.graph.order > 1) {
-      const px = this.extent / Math.max(300, Math.min(this.container.clientWidth, this.container.clientHeight) || 800);
-      const reach = (id: string) => (isGroupId(id) ? (4 + (this.graph.getNodeAttribute(id, "label") as string).length * 6.5) / 2 : 0);
-      noverlap.assign(this.graph, {
-        maxIterations: 150,
-        inputReducer: (id, a) => ({ x: a.x + reach(id) * px, y: a.y, size: (a.size! + reach(id)) * px }),
-        outputReducer: (id, a) => ({ x: a.x - reach(id) * px, y: a.y }),
-        settings: { margin: 8 * px, ratio: 1, speed: 3 },
-      });
-    }
-
+    // The more lines on screen, the fainter each one, so a fully open repo stays readable.
+    const edgeColor = this.edgeColor(this.graph.order > 600 ? 0.14 : 0.3);
     for (const e of this.data.edges) {
       const s = this.unitOfFile.get(e.source)!;
       const t = this.unitOfFile.get(e.target)!;
       if (s === t) continue;
       if (!this.graph.hasEdge(s, t)) {
-        this.graph.addDirectedEdge(s, t, { count: 1, typeOnly: e.typeOnly, size: 0.5, color: this.edgeColor() });
+        this.graph.addDirectedEdge(s, t, { count: 1, typeOnly: e.typeOnly, size: 0.5, color: edgeColor });
         continue;
       }
       const count = (this.graph.getEdgeAttribute(s, t, "count") as number) + 1;
@@ -446,31 +465,36 @@ export class NetworkView {
     this.emit();
   }
 
-  /** Works out which units and edges stand out: the focus's, or the hovered node's while nothing is focused. */
+  /**
+   * Works out which units and edges stand out: the focus's links, else the hovered node's, else
+   * everything inside the folder being viewed and what it connects to.
+   */
   private relight(): void {
-    const source = this.focusFiles ?? (this.hovered ? new Set(this.filesOf(this.hovered)) : undefined);
+    const hover = this.hovered ? new Set(this.filesOf(this.hovered)) : undefined;
+    const source = this.focusFiles ?? hover ?? this.viewing?.files;
     if (!source) {
       this.lit = undefined;
       this.sigma.refresh();
       return;
     }
-    const lit: Lit = { units: new Set(), neighbours: new Set(), edges: new Map() };
+    const mode = this.focusFiles || hover ? "focus" : "view";
+    const lit: Lit = { mode, units: new Set(), neighbours: new Set(), edges: new Map(), folders: new Set() };
     for (const f of source) lit.units.add(this.unitFor(f)!);
-    const visit = (e: GraphEdge, dir: "out" | "in") => {
-      if (this.filters.hideTypeOnly && e.typeOnly) return;
-      const other = dir === "out" ? e.target : e.source;
-      if (source.has(other)) return;
-      const here = this.unitFor(dir === "out" ? e.source : e.target)!;
-      const there = this.unitFor(other)!;
-      if (here === there) return;
-      if (!lit.units.has(there)) lit.neighbours.add(there);
-      const key = dir === "out" ? this.graph.edge(here, there) : this.graph.edge(there, here);
-      if (key !== undefined) lit.edges.set(key, dir);
-    };
-    for (const f of source) {
-      for (const e of this.adj.outgoing.get(f) ?? []) visit(e, "out");
-      for (const e of this.adj.incoming.get(f) ?? []) visit(e, "in");
+    for (const e of this.data.edges) {
+      if (this.filters.hideTypeOnly && e.typeOnly) continue;
+      const sIn = source.has(e.source);
+      const tIn = source.has(e.target);
+      // Focus shows links out of the focus; viewing also shows the links inside the folder.
+      if (sIn === tIn && (mode === "focus" || !sIn)) continue;
+      const s = this.unitFor(e.source)!;
+      const t = this.unitFor(e.target)!;
+      if (s === t) continue;
+      if (!sIn) lit.neighbours.add(s);
+      if (!tIn) lit.neighbours.add(t);
+      const key = this.graph.edge(s, t);
+      if (key !== undefined) lit.edges.set(key, mode === "view" ? "view" : sIn ? "out" : "in");
     }
+    for (const u of [...lit.units, ...lit.neighbours]) for (const f of this.filesOf(u)) this.folding.pathTo(f).forEach((d) => lit.folders.add(d));
     this.lit = lit;
     this.sigma.refresh();
   }
@@ -494,7 +518,7 @@ export class NetworkView {
   }
 
   private emit(): void {
-    this.onChange({ focus: this.focusLabel, inspected: this.inspected });
+    this.onChange({ focus: this.focusLabel, viewing: this.viewing && `${this.viewing.folder}/`, inspected: this.inspected });
   }
 
   private isHidden(node: string): boolean {
@@ -504,18 +528,100 @@ export class NetworkView {
 
   // Drawing -----------------------------------------------------------------------------------
 
-  /** Labels get a halo in the background colour, so they stay readable over edges. */
-  private drawLabel(...[ctx, data, settings]: Parameters<NodeLabelDrawingFunction>): void {
+  /**
+   * Regions under the graph: every cluster's circle, and every open folder's inside it, tinted with
+   * the cluster's colour and named at the top when open. Regions the current focus or view does not
+   * touch fade back.
+   */
+  private drawRegions(): void {
+    const canvas = this.regionCanvas;
+    const dpr = window.devicePixelRatio || 1;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const settings = this.sigma.getSettings();
+    for (const [folder, r] of [...this.regions].sort((a, b) => a[1].depth - b[1].depth)) {
+      const open = this.expanded.has(folder);
+      // Clusters always show their region; a folder inside one shows it once its parent is open.
+      if (r.depth > 1 && !open && !this.graph.hasNode(groupId(folder))) continue;
+      const c = this.sigma.graphToViewport({ x: r.x, y: r.y });
+      const e = this.sigma.graphToViewport({ x: r.x + r.r, y: r.y });
+      const radius = Math.hypot(e.x - c.x, e.y - c.y);
+      if (radius < 4 || c.x + radius < 0 || c.x - radius > w || c.y + radius < 0 || c.y - radius > h) continue;
+      const cluster = clusterOf({ folder });
+      const tool = isToolFolder(cluster);
+      const dim = this.lit !== undefined && !this.lit.folders.has(folder);
+      const color = dim ? this.faded() : this.colorFor(cluster, false);
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = this.mix(color, open && !dim ? 0.07 : 0.035);
+      ctx.fill();
+      ctx.lineWidth = r.depth === 1 ? 1.5 : 1;
+      ctx.setLineDash(open ? [] : [4, 4]);
+      ctx.strokeStyle = this.mix(color, tool || dim ? 0.3 : 0.6);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (!open || dim || radius < 50) continue;
+      // An open region is named along its top edge; the name competes for space like any label.
+      this.labelQueue.push({
+        text: `${this.groupName(folder, cluster)}/`,
+        x: c.x,
+        y: c.y - radius + settings.labelSize,
+        rank: 2.5 - r.depth * 0.1,
+        size: radius,
+        color: this.mix(this.colorFor(cluster, false), 0.9),
+        center: true,
+      });
+    }
+  }
+
+  /**
+   * Sigma asks for labels in no useful order, and folder labels are always asked for, so long
+   * names could pile up. Labels are queued here and drawn after the frame by drawLabels().
+   */
+  private drawLabel(...[, data]: Parameters<NodeLabelDrawingFunction>): void {
     if (!data.label) return;
-    ctx.font = `${settings.labelWeight} ${settings.labelSize}px ${settings.labelFont}`;
-    const x = data.x + data.size + 4;
-    const y = data.y + settings.labelSize / 3;
+    const key = (data as { key?: string }).key ?? "";
+    const has = (attr: string) => this.graph.hasNode(key) && !!this.graph.getNodeAttribute(key, attr);
+    const rank = key === this.inspected || this.lit?.units.has(key) ? 3 : isGroupId(key) && !has("tool") ? 2 : has("tool") ? 0 : 1;
+    this.labelQueue.push({ text: data.label, x: data.x + data.size + 4, y: data.y, rank, size: data.size });
+  }
+
+  /** Draws the queued labels, most important first (focus, then folders, then bigger nodes), skipping any that would overlap one already drawn. Each gets a halo so it reads over edges. */
+  private drawLabels(): void {
+    const queue = this.labelQueue.sort((a, b) => b.rank - a.rank || b.size - a.size);
+    this.labelQueue = [];
+    if (!queue.length) return;
+    const settings = this.sigma.getSettings();
+    const ctx = this.sigma.getCanvases().labels.getContext("2d");
+    if (!ctx) return;
+    const size = settings.labelSize;
+    ctx.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
     ctx.lineJoin = "round";
     ctx.lineWidth = 3;
-    ctx.strokeStyle = this.background();
-    ctx.strokeText(data.label, x, y);
-    ctx.fillStyle = this.ink();
-    ctx.fillText(data.label, x, y);
+    const placed: Array<[number, number, number, number]> = [];
+    const free = (b: number[]) => !placed.some((p) => b[0] < p[2] && b[2] > p[0] && b[1] < p[3] && b[3] > p[1]);
+    for (const l of queue) {
+      const w = ctx.measureText(l.text).width;
+      // Right of the node first; if that is taken, try its left. Region names stay centred.
+      const spots = l.center ? [l.x - w / 2] : [l.x, l.x - 2 * l.size - 8 - w];
+      const x = spots.find((at) => free([at - 2, l.y - size / 2 - 3, at + w + 2, l.y + size / 2 + 3]));
+      if (x === undefined) continue;
+      placed.push([x - 2, l.y - size / 2 - 3, x + w + 2, l.y + size / 2 + 3]);
+      ctx.strokeStyle = this.background();
+      ctx.strokeText(l.text, x, l.y + size / 3);
+      ctx.fillStyle = l.color ?? this.ink();
+      ctx.fillText(l.text, x, l.y + size / 3);
+    }
   }
 
   /** Hovered and highlighted nodes: a ring and a label chip in the theme's colours (Sigma's default is white on white in dark themes). */
@@ -580,8 +686,8 @@ export class NetworkView {
   }
 
   /** Edges are pre-blended with the background: Sigma adds translucent colours, which brightens them. */
-  private edgeColor(): string {
-    return this.mix(this.theme === "dark" ? "#a6a59c" : "#6e6d64", 0.3);
+  private edgeColor(strength: number): string {
+    return this.mix(this.theme === "dark" ? "#a6a59c" : "#6e6d64", strength);
   }
 }
 

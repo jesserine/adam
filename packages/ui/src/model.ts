@@ -1,4 +1,5 @@
 import type { CodeGraph, GraphNode } from "@adam/core";
+import { hierarchy, pack } from "d3-hierarchy";
 
 /** Folders that only group other modules, so the cluster is one level deeper. */
 const CONTAINER_FOLDERS = new Set(["src", "packages", "apps", "libs", "lib", "app", "modules", "services"]);
@@ -12,6 +13,27 @@ export function clusterOf(node: Pick<GraphNode, "folder">): string {
   const parts = node.folder.split("/");
   if (CONTAINER_FOLDERS.has(parts[0]) && parts.length > 1) return `${parts[0]}/${parts[1]}`;
   return parts[0];
+}
+
+/**
+ * The dotted prefix most top-level clusters share, as in .NET solutions (`CPBuild.Domain`,
+ * `CPBuild.Host`, ...), so labels can drop it. Empty when there is no such prefix.
+ */
+export function sharedPrefix(clusters: string[]): string {
+  const code = clusters.filter((c) => !isToolFolder(c) && !c.includes("/"));
+  if (code.length < 3) return "";
+  const counts = new Map<string, number>();
+  for (const c of code) {
+    const dot = c.indexOf(".");
+    if (dot > 0 && dot < c.length - 1) counts.set(c.slice(0, dot + 1), (counts.get(c.slice(0, dot + 1)) ?? 0) + 1);
+  }
+  const [prefix, count] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+  return count >= 3 && count >= code.length * 0.6 ? prefix : "";
+}
+
+/** Editor and CI folders (`.idea`, `.vscode`, `.github`): shown, but quieter than code. */
+export function isToolFolder(folder: string): boolean {
+  return folder.startsWith(".");
 }
 
 /**
@@ -31,7 +53,10 @@ export const OTHER_COLOR = { light: "#9a9a94", dark: "#76766f" };
  */
 export function assignClusterSlots(graph: CodeGraph, previous = new Map<string, number>()): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const n of graph.nodes) counts.set(clusterOf(n), (counts.get(clusterOf(n)) ?? 0) + 1);
+  for (const n of graph.nodes) {
+    const cluster = clusterOf(n);
+    if (!isToolFolder(cluster)) counts.set(cluster, (counts.get(cluster) ?? 0) + 1);
+  }
   const slots = new Map<string, number>();
   for (const [cluster, slot] of previous) if (counts.has(cluster)) slots.set(cluster, slot);
   const free = CLUSTER_COLORS.light.map((_, i) => i).filter((i) => ![...slots.values()].includes(i));
@@ -192,4 +217,61 @@ export function fileLabels(ids: string[]): Map<string, string> {
     }
   }
   return labels;
+}
+
+// Regions ------------------------------------------------------------------------------------
+
+export interface Region {
+  x: number;
+  y: number;
+  r: number;
+  /** 1 for a cluster (`apps/web`), deeper for folders inside it. */
+  depth: number;
+}
+
+interface PackNode {
+  id: string;
+  weight: number;
+  children?: PackNode[];
+}
+
+/**
+ * Lays every file out by region: each cluster gets its own circle, each foldable folder a circle
+ * inside it, and files are packed inside their folder with the most connected ones in the middle.
+ * The same files always give the same picture, and opening a folder never moves anything.
+ */
+export function packRegions(
+  files: Array<{ id: string; weight: number }>,
+  folding: Folding,
+): { positions: Map<string, { x: number; y: number }>; regions: Map<string, Region>; size: number } {
+  const root: PackNode = { id: "", weight: 0, children: [] };
+  const folders = new Map<string, PackNode>();
+  for (const f of files) {
+    let parent = root;
+    for (const folder of folding.pathTo(f.id)) {
+      let node = folders.get(folder);
+      if (!node) {
+        node = { id: folder, weight: 0, children: [] };
+        folders.set(folder, node);
+        parent.children!.push(node);
+      }
+      parent = node;
+    }
+    parent.children!.push({ id: f.id, weight: f.weight });
+  }
+  const size = 24 * Math.sqrt(Math.max(1, files.length));
+  const tree = hierarchy(root)
+    .sum((d) => (d.children ? 0 : 1))
+    .sort((a, b) => b.value! - a.value! || b.data.weight - a.data.weight || a.data.id.localeCompare(b.data.id));
+  const packed = pack<PackNode>()
+    .size([size, size])
+    .padding((d) => (d.depth === 0 ? 14 : 5))(tree);
+  const positions = new Map<string, { x: number; y: number }>();
+  const regions = new Map<string, Region>();
+  for (const d of packed.descendants()) {
+    if (d.depth === 0) continue;
+    if (d.data.children) regions.set(d.data.id, { x: d.x, y: d.y, r: d.r, depth: d.depth });
+    else positions.set(d.data.id, { x: d.x, y: d.y });
+  }
+  return { positions, regions, size };
 }

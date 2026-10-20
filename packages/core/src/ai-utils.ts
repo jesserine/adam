@@ -92,7 +92,8 @@ export async function probeAiProviderKey(
         headers["Authorization"] = `Bearer ${apiKey.trim()}`;
         break;
       case "gemini":
-        url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey.trim())}`;
+        url = "https://generativelanguage.googleapis.com/v1beta/models";
+        headers["x-goog-api-key"] = apiKey.trim();
         break;
     }
 

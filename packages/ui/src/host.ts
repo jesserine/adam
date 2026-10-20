@@ -137,37 +137,12 @@ export function createBrowserHost(): Host {
       const events = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
       events.addEventListener("graph", () => listener());
     },
-    getAiConfig: () => call("/api/ai/config"),
-    saveAiConfig: (req) =>
-      call("/api/ai/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req),
-      }),
-    deleteAiConfig: (provider) =>
-      call("/api/ai/config", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider }),
-      }),
-    setActiveAiProvider: (provider) =>
-      call("/api/ai/active", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider }),
-      }),
-    validateAiKey: (req) =>
-      call("/api/ai/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req),
-      }),
-    analyzeNodeThreats: (req) =>
-      call("/api/ai/threats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req),
-      }),
+    getAiConfig: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    saveAiConfig: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    deleteAiConfig: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    setActiveAiProvider: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    validateAiKey: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    analyzeNodeThreats: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
   };
 }
 

@@ -1,9 +1,10 @@
 // Builds every shippable piece with esbuild:
-//   packages/service/dist/  standalone service (main.js) + web UI (ui/)
-//   packages/vscode/dist/   extension.js + service.js + ui/  (what goes into the .vsix)
+//   packages/service/dist/  standalone service (main.js) + C# parser (.wasm) + web UI (ui/)
+//   packages/vscode/dist/   extension.js + service.js + C# parser (.wasm) + ui/  (what goes into the .vsix)
 // Pass --dev for unminified output with source maps.
 import { build } from "esbuild";
 import { copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,7 +26,19 @@ async function buildUi(outdir) {
   copyFileSync(p("packages/ui/index.html"), join(outdir, "index.html"));
 }
 
+// The C# parser runs as WebAssembly; the service loads these from its own folder.
+const require = createRequire(join(root, "packages/core/package.json"));
+const WASM = [require.resolve("web-tree-sitter/tree-sitter.wasm"), require.resolve("tree-sitter-c-sharp/tree-sitter-c_sharp.wasm")];
+
+// web-tree-sitter's ESM build finds itself through import.meta.url, which a CommonJS bundle lacks;
+// its CommonJS build works in both.
+const nodeAliases = { "web-tree-sitter": require.resolve("web-tree-sitter") };
+
 async function buildService(outfile) {
+  for (const wasm of WASM) {
+    mkdirSync(dirname(outfile), { recursive: true });
+    copyFileSync(wasm, join(dirname(outfile), wasm.split(/[\\/]/).pop()));
+  }
   await build({
     ...common,
     entryPoints: [p("packages/service/src/main.ts")],
@@ -33,6 +46,7 @@ async function buildService(outfile) {
     format: "cjs",
     platform: "node",
     target: "node20",
+    alias: nodeAliases,
   });
 }
 

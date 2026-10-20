@@ -18,20 +18,51 @@ packages/
 2. The service walks the repo (respecting `.gitignore`), makes every file a node, and parses
    TypeScript and JavaScript with the TypeScript compiler to get symbols, imports and env reads.
    Imports resolve to edges through the nearest `tsconfig.json`/`jsconfig.json`, so path aliases
-   and monorepo workspace packages link up.
+   and monorepo workspace packages link up. C# files are parsed with tree-sitter (see below);
+   `.csproj`, `.sln` and `.slnx` files are read for project references and NuGet packages.
 3. Facts per file are cached in `.adam/cache.json`, keyed by size and modified time. A re-index
    only re-reads changed files. The service watches the folder and re-indexes after a save, then
    pushes a `graph` event to clients.
 4. The webview asks the extension for data over `postMessage`; the extension forwards to the
    service. In a browser the UI calls the service directly with the token from the URL fragment.
 
+## C# and .NET
+
+C# is parsed with the [tree-sitter C# grammar](https://github.com/tree-sitter/tree-sitter-c-sharp)
+running as WebAssembly through `web-tree-sitter`. Two `.wasm` files (about 5.5 MB) ship next to
+`service.js`, so the same build works on Windows, macOS and Linux with no .NET SDK, no native
+module and no per-platform binary. Roslyn would give exact semantic references, but it needs the
+.NET SDK on the engineer's machine (or a self-contained .NET binary per OS), a restore before a
+project loads, and seconds of start-up; most of Adam's users will not have it.
+
+Tree-sitter gives syntax only, so edges are resolved by name the way the C# compiler looks names
+up, in `packages/core/src/dotnet.ts`:
+
+1. Every C# file contributes the namespaces and fully qualified types it declares, its usings
+   (file, `global`, alias, `static`) and the type names it uses.
+2. Each `.cs` file belongs to the nearest `.csproj` above it. A name resolves only to files in that
+   project or the projects it references (transitively), so two samples that both declare
+   `Shop.Models.User` do not cross-link.
+3. A name is looked up in the enclosing namespaces (innermost first), then in usings, global
+   usings (from `.cs` files and `<Using Include>`), the SDK's implicit usings, aliases and static
+   usings.
+4. Calls like `builder.AddServices()` link to extension methods of that name declared in a
+   namespace the caller can see. Parts of a `partial` type link to each other.
+
+Known gaps: types used only from XAML or Razor, `Directory.Build.props` usings, and calls that
+need type inference to tell overloads or same-named extension methods apart. Accuracy against
+Roslyn's references is the next benchmark to add.
+
 ## Secrets
 
 - Sensitive nodes (`.env*`, keys, certificates, credentials, cloud service accounts, registry
-  configs, non-development `appsettings`) never leave the core unmasked. Env-style files show
-  their variable names only.
+  configs, every `appsettings*.json`, `local.settings.json`, user `secrets.json`,
+  `web.config`/`app.config`) never leave the core unmasked. Env-style and settings files show
+  their keys only (`DATABASE_URL`, `ConnectionStrings:Default`); a settings file that cannot be
+  read cleanly is withheld entirely.
 - Secret-looking values in ordinary files (private keys, cloud and VCS tokens, API keys, JWTs,
-  connection-string passwords) are redacted before content is served.
+  connection-string passwords, ADO.NET `Password=`/`AccountKey=` values) are redacted before
+  content is served.
 - The cache stores no hash and no content for sensitive nodes.
 - The service only serves files that are in the index, checks Host and Origin headers, and
   requires the token on every API call.

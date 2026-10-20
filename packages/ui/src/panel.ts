@@ -90,7 +90,13 @@ export function renderNodePanel(container: HTMLElement, node: GraphNode, ctx: Pa
     section(`Imports (${ctx.outgoing.length})`, edgeList(ctx.outgoing, "target", ctx)),
     section(`Imported by (${ctx.incoming.length})`, edgeList(ctx.incoming, "source", ctx)),
   );
-  if (node.packages.length) container.append(section(`Packages (${node.packages.length})`, tagList(node.packages)));
+  if (node.project) {
+    container.append(section("Project", h("button", { class: "link", onclick: () => ctx.onSelect(node.project!) }, node.project)));
+  }
+  if (node.packages.length) {
+    const title = node.language === "csharp" ? "Namespaces from outside the repo" : "Packages";
+    container.append(section(`${title} (${node.packages.length})`, tagList(node.packages)));
+  }
   if (node.envReads.length) container.append(section(`Reads env (${node.envReads.length})`, tagList(node.envReads)));
   if (node.unresolved.length) {
     container.append(

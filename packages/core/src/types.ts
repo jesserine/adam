@@ -1,5 +1,5 @@
 /** Bumped whenever the shape of the graph or cache changes, so old caches are ignored. */
-export const GRAPH_VERSION = 1;
+export const GRAPH_VERSION = 2;
 
 export interface Position {
   /** 1-based line. */
@@ -34,16 +34,28 @@ export interface CodeSymbol {
   end: Position;
 }
 
-export type EdgeKind = "imports" | "re-exports" | "dynamic-import" | "requires";
+export type EdgeKind =
+  | "imports"
+  | "re-exports"
+  | "dynamic-import"
+  | "requires"
+  /** C#: the source uses a type (or calls an extension method) declared in the target. */
+  | "references"
+  /** C#: the source declares another part of a partial type declared in the target. */
+  | "partial"
+  /** .NET: a project's `<ProjectReference>` to another project. */
+  | "project-reference"
+  /** .NET: a solution lists the project. */
+  | "solution-project";
 
 export interface GraphEdge {
   id: string;
-  /** Node id of the importing file. */
+  /** Node id of the importing (or referencing) file. */
   source: string;
   /** Node id of the imported file. */
   target: string;
   kind: EdgeKind;
-  /** The module specifier as written, e.g. `./db` or `@/lib/auth`. */
+  /** The module specifier as written, e.g. `./db` or `@/lib/auth`; for C#, the type names used. */
   specifier: string;
   /** True for `import type` / `export type` edges, which vanish at runtime. */
   typeOnly: boolean;
@@ -70,12 +82,21 @@ export interface GraphNode {
   /** True when the file was parsed for symbols and imports. */
   parsed: boolean;
   symbols: CodeSymbol[];
-  /** Bare package imports such as `react` or `@prisma/client`. */
+  /**
+   * Bare package imports such as `react` or `@prisma/client`; NuGet packages for a .NET project
+   * file; namespaces from outside the repo for a C# file (`System.Text.Json`).
+   */
   packages: string[];
-  /** Environment variables read via `process.env.X` or `import.meta.env.X`. */
+  /**
+   * Environment variables read via `process.env.X`, `import.meta.env.X` or
+   * `Environment.GetEnvironmentVariable("X")`, plus .NET configuration keys read through
+   * `IConfiguration` (`Jwt:Key`, `ConnectionStrings:Default`).
+   */
   envReads: string[];
-  /** Variable names an env-style file declares (names only, never values). */
+  /** Keys an env-style or settings file declares (names only, never values), e.g. `Jwt:Key` for appsettings. */
   envDeclares: string[];
+  /** For a C# file, the `.csproj` that owns it. */
+  project?: string;
   /** Imports that look local but did not resolve to a file in the repo. */
   unresolved: string[];
 }

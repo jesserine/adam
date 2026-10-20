@@ -132,6 +132,7 @@ button {
 }
 
 .main {
+  position: relative;
   flex: 1;
   display: flex;
   min-height: 0;
@@ -146,6 +147,53 @@ button {
 .network {
   position: absolute;
   inset: 0;
+}
+
+.focus-bar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  max-width: calc(100% - 24px);
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  font-size: 12px;
+  z-index: 2;
+}
+
+.focus-bar[hidden] {
+  display: none;
+}
+
+.focus-bar strong {
+  font-weight: 600;
+}
+
+.focus-bar .hint {
+  color: var(--muted);
+}
+
+.focus-bar .arrow-out,
+.focus-bar .arrow-in {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  margin-right: 4px;
+  vertical-align: middle;
+  background: var(--fg);
+}
+
+.focus-bar .arrow-in {
+  background: var(--muted);
+}
+
+.focus-bar button {
+  padding: 2px 8px;
 }
 
 .legend {
@@ -228,8 +276,15 @@ button {
   outline: 1px solid var(--accent);
 }
 
+/* The panel floats over the network, so opening it never resizes the canvas or moves the graph. */
 .panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
   width: min(440px, 45vw);
+  box-shadow: -6px 0 18px rgb(0 0 0 / 0.18);
   border-left: 1px solid var(--border);
   overflow: auto;
   background: var(--bg);
@@ -256,8 +311,17 @@ button {
   word-break: break-all;
 }
 
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.panel-actions .ghost {
+  padding: 4px 10px;
+}
+
 .panel-head .primary {
-  justify-self: start;
   background: var(--accent);
   color: var(--accent-fg);
   border: 0;
@@ -454,11 +518,9 @@ button {
 }
 
 @media (max-width: 700px) {
-  .main {
-    flex-direction: column;
-  }
-
   .panel {
+    top: auto;
+    left: 0;
     width: 100%;
     max-height: 55vh;
     border-left: 0;

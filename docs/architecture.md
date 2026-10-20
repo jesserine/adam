@@ -79,6 +79,12 @@ Roslyn's references is the next benchmark to add.
   returns to that step with the folders that were open then. Esc clears the focus first.
   Clicking the empty canvas only clears the focus. Clearing a focus folds back every folder
   opened while it was set (to show a focused file, or expanded by hand) and returns the camera.
+- The Folders view keeps its own selection and panel (`renderFolderPanel` in `main.ts`): a
+  file gets the network's node panel, a folder the folder panel with links grouped by folder,
+  and no Groups section. **View in network** calls `focusOn` for a file or `viewFolder` for a
+  folder, which opens the matching network folder (or each file, for a folder the network skips)
+  and pushes it onto the trail. Sidebar and panel sections are `<details>` built by
+  `collapsible()` in `dom.ts`, which remembers closed sections by title across re-renders.
 - Folders fold along each file's path, starting from its cluster (`apps/web`, `packages/db`).
   Pass-through folders (a parent's only entry, such as `apps/web/src`) and one-file folders are
   skipped, so every expand shows something new.

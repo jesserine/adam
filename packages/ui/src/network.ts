@@ -359,6 +359,29 @@ export class NetworkView {
     this.rebuild();
   }
 
+  /**
+   * Opens any folder of the repo and views it, as if it had been double-clicked, for the
+   * Folders view's "View in network". A folder the network skips (a pass-through folder, or one
+   * with a single file) opens the network folder holding the same files, or failing that shows
+   * each of its files.
+   */
+  viewFolder(path: string): void {
+    const files = this.data.nodes.map((n) => n.id).filter((id) => id.startsWith(`${path}/`));
+    if (!files.length) return;
+    this.focusFiles = this.focusLabel = this.inspected = this.focusBefore = undefined;
+    const before = this.snapshot();
+    const chain = this.folding.pathTo(files[0]);
+    const same = chain.find((f) => this.folding.membersOf(f).length === files.length && files.every((id) => this.folding.pathTo(id).includes(f)));
+    if (same) chain.slice(0, chain.indexOf(same) + 1).forEach((f) => this.expanded.add(f));
+    else for (const id of files) this.folding.pathTo(id).forEach((f) => this.expanded.add(f));
+    const folder = same ?? path;
+    this.trail = this.trail.filter((t) => t.folder !== folder);
+    this.trail.push({ folder, before });
+    this.viewing = { folder, files: new Set(files) };
+    this.rebuild();
+    this.frameFiles(this.viewing.files);
+  }
+
   /** Whether a unit can be collapsed into a folder above it. */
   canCollapse(unit: string): boolean {
     return this.folding.parentOf(unit) !== undefined;

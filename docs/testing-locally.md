@@ -88,7 +88,12 @@ Open any project folder and run **Adam: Open Network View**. To remove it later,
   example add an import) and the network updates within a second.
 - **Secrets:** click a `.env` file. You should see variable names with `••••••••` instead of
   values. Opening it in the editor asks first.
-- **Folders:** the **Folders** tab shows the usual tree over the same nodes.
+- **Folders:** the **Folders** tab shows the usual tree over the same nodes. Click a file to see
+  the same details as in the network (info, symbols, imports, imported by, project), or a folder
+  to see its imports by folder and its files. The sidebar has no Groups here. **View in network**
+  switches to the network with the file focused or the folder opened.
+- **Sidebar sections:** every heading (Node info, Groups, Imports, Imported by, Symbols, …)
+  folds its section away when clicked, and it stays folded until opened again.
 - **Filters and search:** "Hide unconnected", "Hide type-only imports", and the search box
   (file name, path or function name, then Enter).
 

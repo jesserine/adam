@@ -624,3 +624,65 @@ button {
     border-top: 1px solid var(--border);
   }
 }
+
+/* Sidebar and panel sections open and close from their headings. */
+.side-info > summary,
+.side-groups > summary,
+.panel-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.side-info > summary::-webkit-details-marker,
+.side-groups > summary::-webkit-details-marker,
+.panel-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.side-info > summary::before,
+.side-groups > summary::before,
+.panel-section > summary::before {
+  content: "▸";
+  width: 10px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.side-info[open] > summary::before,
+.side-groups[open] > summary::before,
+.panel-section[open] > summary::before {
+  content: "▾";
+}
+
+.side-info > summary:hover h3,
+.side-groups > summary:hover h3,
+.panel-section > summary:hover h3 {
+  color: var(--fg);
+}
+
+.side-info:not([open]),
+.side-groups:not([open]) {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.side-groups:not([open]) {
+  border-bottom: 1px solid var(--border);
+}
+
+.tree-folder.selected {
+  border-radius: 3px;
+  background: var(--code-bg);
+  outline: 1px solid var(--accent);
+}
+
+/* In the Folders view there are no groups, so the details panel takes the whole sidebar. */
+.sidebar:has(.side-groups[hidden]) .side-info[open] {
+  flex: 1 1 auto;
+  max-height: none;
+}

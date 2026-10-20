@@ -1,8 +1,8 @@
 import type { CodeGraph } from "@adam/core";
-import { h } from "./dom";
+import { collapsible, h } from "./dom";
 import { createHost } from "./host";
 import { adjacency, buildTree, isGroupId, type TreeEntry } from "./model";
-import { NetworkView, type NetworkState, type Theme } from "./network";
+import { NetworkView, type NetworkState, type Theme, type UnitLink } from "./network";
 import { renderGroupPanel, renderNodePanel } from "./panel";
 import "./styles.css";
 
@@ -24,6 +24,8 @@ const state = {
   /** The node or folder whose panel is open. */
   selected: undefined as string | undefined,
   view: "network" as "network" | "folders",
+  /** The file or folder picked in the Folders view, which has its own panel. */
+  picked: undefined as string | undefined,
 };
 
 // Layout -------------------------------------------------------------------------------------
@@ -42,6 +44,10 @@ const treeEl = h("div", { class: "tree", hidden: true });
 const panelEl = h("div", { class: "panel" });
 const statusEl = h("div", { class: "status", hidden: true });
 const focusBar = h("div", { class: "focus-bar", hidden: true });
+const infoTitle = h("h3", {}, "Node info");
+const infoSection = collapsible("Node info", { class: "side-info" }, panelEl);
+infoSection.querySelector("summary")!.replaceChildren(infoTitle);
+const groupsSection = collapsible("Groups", { class: "side-groups" }, h("label", { class: "group-row all" }, selectAll, h("span", {}, "Show all")), groupsEl);
 
 document.body.append(
   h(
@@ -68,8 +74,8 @@ document.body.append(
         "aside",
         { class: "sidebar" },
         h("div", { class: "side-search" }, search, datalist),
-        h("section", { class: "side-info" }, h("h3", {}, "Node info"), panelEl),
-        h("section", { class: "side-groups" }, h("h3", {}, "Groups"), h("label", { class: "group-row all" }, selectAll, h("span", {}, "Show all")), groupsEl),
+        infoSection,
+        groupsSection,
         h("footer", { class: "side-stats" }, stats),
       ),
     ),
@@ -174,13 +180,35 @@ function setView(view: "network" | "folders"): void {
   networkTab.classList.toggle("active", view === "network");
   foldersTab.classList.toggle("active", view === "folders");
   networkEl.hidden = view !== "network";
-  groupsEl.closest("section")!.hidden = view !== "network";
+  // The Folders view has its own panel: what is picked in the tree, and no groups.
+  groupsSection.hidden = view !== "network";
   treeEl.hidden = view !== "folders";
+  infoTitle.textContent = view === "network" ? "Node info" : "Details";
   if (view === "folders") renderTree();
   renderFocusBar();
+  renderPanel();
+}
+
+/** Picks a file or folder in the Folders view: it opens in the tree and its details fill the panel. */
+function pick(id: string): void {
+  state.picked = id;
+  renderPanel();
+  markTreeSelection();
+}
+
+/** Leaves the Folders view for the network, with the file focused or the folder opened there. */
+function viewInNetwork(id: string): void {
+  setView("network");
+  if (state.graph?.nodes.some((n) => n.id === id)) network.focusOn(id);
+  else network.viewFolder(id);
+}
+
+function viewInNetworkButton(id: string): HTMLElement {
+  return h("button", { class: "primary", onclick: () => viewInNetwork(id), title: "Show this in the network view" }, "View in network");
 }
 
 function renderPanel(): void {
+  if (state.view === "folders") return renderFolderPanel();
   const id = state.selected;
   if (!id || !state.graph || !state.adj) {
     panelEl.replaceChildren(h("p", { class: "empty" }, "Click a node to inspect it."));
@@ -214,7 +242,53 @@ function renderPanel(): void {
       actions: collapse,
     });
   }
-  panelEl.closest("section")!.scrollTop = 0;
+  infoSection.scrollTop = 0;
+}
+
+/** The Folders view's panel: the same details as the network's, for whatever is picked in the tree. */
+function renderFolderPanel(): void {
+  const id = state.picked;
+  if (!id || !state.graph || !state.adj) {
+    panelEl.replaceChildren(h("p", { class: "empty" }, "Click a file or folder to see its details."));
+    return;
+  }
+  const node = state.graph.nodes.find((n) => n.id === id);
+  if (node) {
+    renderNodePanel(panelEl, node, {
+      host,
+      incoming: state.adj.incoming.get(node.id) ?? [],
+      outgoing: state.adj.outgoing.get(node.id) ?? [],
+      onSelect: pick,
+      actions: [viewInNetworkButton(id)],
+    });
+  } else {
+    const files = state.graph.nodes.filter((n) => n.id.startsWith(`${id}/`));
+    renderGroupPanel(panelEl, {
+      folder: id,
+      files,
+      ...folderLinks(id),
+      onExpand: () => undefined,
+      onSelect: pick,
+      primary: viewInNetworkButton(id),
+    });
+  }
+  infoSection.scrollTop = 0;
+}
+
+/** The folders a folder imports from and is imported by, each by the folder its files sit in, busiest first. */
+function folderLinks(folder: string): { outgoing: UnitLink[]; incoming: UnitLink[] } {
+  const inside = (id: string) => id.startsWith(`${folder}/`);
+  const dir = (id: string) => id.slice(0, id.lastIndexOf("/"));
+  const out = new Map<string, number>();
+  const inc = new Map<string, number>();
+  for (const n of state.graph!.nodes) {
+    if (!inside(n.id)) continue;
+    for (const e of state.adj!.outgoing.get(n.id) ?? []) if (!inside(e.target)) out.set(dir(e.target), (out.get(dir(e.target)) ?? 0) + 1);
+    for (const e of state.adj!.incoming.get(n.id) ?? []) if (!inside(e.source)) inc.set(dir(e.source), (inc.get(dir(e.source)) ?? 0) + 1);
+  }
+  const list = (m: Map<string, number>) =>
+    [...m].map(([unit, count]) => ({ unit, label: `${unit}/`, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  return { outgoing: list(out), incoming: list(inc) };
 }
 
 function renderTree(): void {
@@ -223,10 +297,10 @@ function renderTree(): void {
     const ul = h("ul", { role: depth === 0 ? "tree" : "group" });
     for (const e of entries) {
       if (e.children) {
-        const det = h("details", { open: depth === 0 }, h("summary", {}, `${e.name}/`), render(e.children, depth + 1));
+        const det = h("details", { open: depth === 0 }, h("summary", { class: "tree-folder", "data-id": e.path, onclick: () => pick(e.path) }, `${e.name}/`), render(e.children, depth + 1));
         ul.append(h("li", {}, det));
       } else {
-        ul.append(h("li", {}, h("button", { class: "tree-file", "data-id": e.path, onclick: () => select(e.path) }, e.name)));
+        ul.append(h("li", {}, h("button", { class: "tree-file", "data-id": e.path, onclick: () => pick(e.path) }, e.name)));
       }
     }
     return ul;
@@ -236,11 +310,12 @@ function renderTree(): void {
 }
 
 function markTreeSelection(): void {
-  treeEl.querySelectorAll<HTMLButtonElement>(".tree-file").forEach((b) => {
-    const on = b.dataset.id === state.selected;
+  treeEl.querySelectorAll<HTMLElement>(".tree-file, .tree-folder").forEach((b) => {
+    const on = b.dataset.id === state.picked;
     b.classList.toggle("selected", on);
     if (on) {
-      for (let p = b.parentElement; p && p !== treeEl; p = p.parentElement) if (p instanceof HTMLDetailsElement) p.open = true;
+      for (let p = b.parentElement?.parentElement; p && p !== treeEl; p = p.parentElement) if (p instanceof HTMLDetailsElement) p.open = true;
+      b.scrollIntoView({ block: "nearest" });
     }
   });
 }

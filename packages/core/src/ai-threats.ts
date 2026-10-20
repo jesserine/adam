@@ -417,12 +417,11 @@ export async function analyzeNodeSecurityThreats(
         });
 
         if (!res.ok) {
-          const errData = (await res.json().catch(() => ({}))) as Record<string, any>;
-          const msg =
-            errData.error?.message ||
-            errData.message ||
-            `${provider === "grok" ? "xAI Grok" : "OpenAI"} API failed with status ${res.status}: ${res.statusText}`;
-          throw new ThreatAnalysisError(msg, "PROVIDER_ERROR", res.status);
+          throw new ThreatAnalysisError(
+            `${provider === "grok" ? "xAI Grok" : "OpenAI"} request failed (HTTP ${res.status}). Check the API key and selected model, then try again.`,
+            "PROVIDER_ERROR",
+            res.status,
+          );
         }
 
         const data = (await res.json()) as any;
@@ -513,7 +512,7 @@ export async function analyzeNodeSecurityThreats(
       );
     }
     throw new ThreatAnalysisError(
-      error?.message || String(err),
+      "Threat analysis failed unexpectedly. Check the provider configuration and try again.",
       "PROVIDER_ERROR",
       500,
     );

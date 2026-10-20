@@ -77,7 +77,8 @@ Open any project folder and run **Adam: Open Network View**. To remove it later,
 - **Click a node (focus):** its links stay lit and a bar at the top says what is focused. Bright
   arrows are imports, grey ones are imported-by. While focused, clicking any other node only
   opens its panel (its link to the focus is drawn thicker); the lit links do not change. Click the
-  empty canvas, press Esc or **Clear focus** to unfocus; folders the focus opened fold back.
+  empty canvas, press Esc or **Clear focus** to unfocus; any folder opened while focused (for
+  example, focus a group, then expand it) folds back.
 - **Panel:** for a file, language, size, imports, imported-by, packages and env variables it
   reads. For a folder, its size, the folders it imports from and is imported by (with counts),
   and its files.

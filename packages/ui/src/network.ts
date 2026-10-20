@@ -279,7 +279,10 @@ export class NetworkView {
     if (pos) void this.sigma.getCamera().animate({ x: pos.x, y: pos.y, ratio: 0.4 }, { duration: 400 });
   }
 
-  /** Clears the focus, and folds back any folders that were opened only to show a focused node. */
+  /**
+   * Clears the focus, and folds back any folders opened while it was set, whether opened to show
+   * a focused node or by expanding a folder, so the view returns to how it was before the focus.
+   */
   clearFocus(): void {
     if (!this.focusFiles && !this.inspected) return;
     this.focusFiles = this.focusLabel = this.inspected = undefined;
@@ -290,8 +293,14 @@ export class NetworkView {
       this.emit();
       return;
     }
+    this.trail = this.trail.filter((t) => before.expanded.has(t.folder));
+    const moved = this.viewing !== before.viewing;
     this.expanded = new Set(before.expanded);
+    this.viewing = before.viewing;
     this.rebuild();
+    if (!moved) return;
+    if (this.viewing) this.frameFiles(this.viewing.files);
+    else this.fit();
   }
 
   /**
@@ -332,6 +341,8 @@ export class NetworkView {
   toggle(unit: string): void {
     if (isGroupId(unit)) {
       const folder = groupFolder(unit);
+      // Folders opened while something is focused fold back when the focus is cleared.
+      if ((this.focusFiles || this.inspected) && !this.focusBefore) this.focusBefore = this.snapshot();
       this.trail.push({ folder, before: this.snapshot() });
       this.expanded.add(folder);
       this.viewing = { folder, files: new Set(this.folding.membersOf(folder)) };

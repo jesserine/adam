@@ -77,8 +77,8 @@ Roslyn's references is the next benchmark to add.
   anything they import or are imported by stay bright, the rest fades. Each open is pushed onto
   a trail shown as a breadcrumb (`All › routes/_app/ › _app/products/`); a crumb, Back or Esc
   returns to that step with the folders that were open then. Esc clears the focus first.
-  Clicking the empty canvas only clears the focus, and folders that a focus opened just to show
-  a file fold back with it.
+  Clicking the empty canvas only clears the focus. Clearing a focus folds back every folder
+  opened while it was set (to show a focused file, or expanded by hand) and returns the camera.
 - Folders fold along each file's path, starting from its cluster (`apps/web`, `packages/db`).
   Pass-through folders (a parent's only entry, such as `apps/web/src`) and one-file folders are
   skipped, so every expand shows something new.

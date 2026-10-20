@@ -80,5 +80,5 @@ describe("Host threat analysis wiring", () => {
       "AI features are available in the VS Code extension only.",
     );
     expect(fetchSpy).not.toHaveBeenCalled();
-  });;
+  });
 });

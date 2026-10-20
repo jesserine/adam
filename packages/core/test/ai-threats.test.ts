@@ -236,7 +236,7 @@ describe("ai-threats", () => {
           provider: "gemini",
           apiKey: "AQ.expiredKey12345",
         }),
-      ).rejects.toThrow("API key expired");
+      ).rejects.toThrow("Gemini request failed (HTTP 403). Check the API key and selected model, then try again.");
     });
   });
 
@@ -396,6 +396,7 @@ describe("ai-threats", () => {
       expect(capturedBody.tool_choice).toEqual({ type: "tool", name: "report_security_threats" });
       expect(report.provider).toBe("claude");
       expect(report.threats[0].category).toBe("crypto");
+      expect(report.overallRisk).toBe("high");
     });
   });
 

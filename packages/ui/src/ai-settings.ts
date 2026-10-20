@@ -170,7 +170,7 @@ export async function openAiSettingsDialog(
     h(
       "span",
       { class: "ai-security-text" },
-      "Stored locally and safely. Your API key never leaves your machine except when contacting the provider directly.",
+      "Stored locally and safely. Your API key is stored in VS Code SecretStorage and is sent only to the selected provider. When you run a scan, the selected file’s source code and analysis context are sent to that provider. Do not scan confidential code unless your provider’s data-handling terms permit it.",
     ),
   );
 

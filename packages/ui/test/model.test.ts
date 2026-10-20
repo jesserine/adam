@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CodeGraph, GraphNode } from "@adam/core";
-import { sharedPrefix, assignClusterSlots, buildTree, clusterOf, fileLabels, Folding, groupFolder, groupId, ROOT_CLUSTER } from "../src/model";
+import { sharedPrefix, assignClusterSlots, buildTree, clusterOf, fileLabels, Folding, groupFolder, groupId, packRegions, ROOT_CLUSTER } from "../src/model";
 
 const graphOf = (ids: string[]): CodeGraph =>
   ({
@@ -115,5 +115,44 @@ describe("sharedPrefix", () => {
     expect(sharedPrefix(["CPBuild.Domain", "CPBuild.Host", "CPBuild.Shared", ".idea", "docs"])).toBe("CPBuild.");
     expect(sharedPrefix(["apps/web", "packages/db", "scripts"])).toBe("");
     expect(sharedPrefix(["A.One", "B.Two", "C.Three"])).toBe("");
+  });
+});
+
+describe("packRegions", () => {
+  const files = [
+    "apps/web/src/main.tsx",
+    "apps/web/src/lib/a.ts",
+    "apps/web/src/lib/b.ts",
+    "apps/web/src/routes/y.tsx",
+    "packages/db/index.ts",
+    "packages/db/schema.ts",
+    "README.md",
+  ];
+  const folding = new Folding(graphOf(files).nodes);
+  const { positions, regions } = packRegions(
+    files.map((id) => ({ id, weight: id.endsWith("main.tsx") ? 5 : 1 })),
+    folding,
+  );
+  const inside = (p: { x: number; y: number }, r: { x: number; y: number; r: number }) =>
+    Math.hypot(p.x - r.x, p.y - r.y) <= r.r + 1e-6;
+
+  it("places every file inside each folder region on its path", () => {
+    expect(positions.size).toBe(files.length);
+    for (const f of files) {
+      for (const folder of folding.pathTo(f)) expect(inside(positions.get(f)!, regions.get(folder)!)).toBe(true);
+    }
+  });
+
+  it("nests folder regions and keeps clusters apart", () => {
+    expect(regions.get("apps/web")!.depth).toBe(1);
+    expect(regions.get("apps/web/src/lib")!.depth).toBe(2);
+    const web = regions.get("apps/web")!;
+    const db = regions.get("packages/db")!;
+    expect(Math.hypot(web.x - db.x, web.y - db.y)).toBeGreaterThanOrEqual(web.r + db.r);
+  });
+
+  it("is deterministic", () => {
+    const again = packRegions(files.map((id) => ({ id, weight: id.endsWith("main.tsx") ? 5 : 1 })), folding);
+    expect(again.positions.get("apps/web/src/main.tsx")).toEqual(positions.get("apps/web/src/main.tsx"));
   });
 });

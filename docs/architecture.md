@@ -55,10 +55,15 @@ Roslyn's references is the next benchmark to add.
 
 ## Network view
 
-- One ForceAtlas2 layout runs over every file. What is on screen is built from it: a folder that
-  is collapsed becomes one node at the middle of its files, and edges between nodes are summed
-  file imports. Opening or closing a folder rebuilds the screen graph without moving the layout,
-  and the camera keeps a fixed frame, so nothing else jumps.
+- Files are laid out by region, like nested rings: each cluster is a circle, each folder a circle
+  inside it, and files are packed in their folder with the most connected ones at the centre
+  (d3-hierarchy `pack`). The layout is computed once over every file and never moves, so it reads
+  the same every time. A collapsed folder becomes one node at the centre of its region, and edges
+  between nodes are summed file imports. Opening or closing a folder rebuilds the screen graph
+  without moving anything, and the camera keeps a fixed frame.
+- Opening a folder frames its region and puts the view in "viewing" mode: the folder's files and
+  anything they import or are imported by stay bright, the rest fades. Esc (or clicking the
+  empty canvas) steps back: first the focus, then the viewing mode.
 - Folders fold along each file's path, starting from its cluster (`apps/web`, `packages/db`).
   Pass-through folders (a parent's only entry, such as `apps/web/src`) and one-file folders are
   skipped, so every expand shows something new.

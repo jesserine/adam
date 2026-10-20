@@ -1,4 +1,5 @@
 import type { CodeGraph, GraphNode } from "@adam/core";
+import { hierarchy, pack } from "d3-hierarchy";
 
 /** Folders that only group other modules, so the cluster is one level deeper. */
 const CONTAINER_FOLDERS = new Set(["src", "packages", "apps", "libs", "lib", "app", "modules", "services"]);
@@ -216,4 +217,61 @@ export function fileLabels(ids: string[]): Map<string, string> {
     }
   }
   return labels;
+}
+
+// Regions ------------------------------------------------------------------------------------
+
+export interface Region {
+  x: number;
+  y: number;
+  r: number;
+  /** 1 for a cluster (`apps/web`), deeper for folders inside it. */
+  depth: number;
+}
+
+interface PackNode {
+  id: string;
+  weight: number;
+  children?: PackNode[];
+}
+
+/**
+ * Lays every file out by region: each cluster gets its own circle, each foldable folder a circle
+ * inside it, and files are packed inside their folder with the most connected ones in the middle.
+ * The same files always give the same picture, and opening a folder never moves anything.
+ */
+export function packRegions(
+  files: Array<{ id: string; weight: number }>,
+  folding: Folding,
+): { positions: Map<string, { x: number; y: number }>; regions: Map<string, Region>; size: number } {
+  const root: PackNode = { id: "", weight: 0, children: [] };
+  const folders = new Map<string, PackNode>();
+  for (const f of files) {
+    let parent = root;
+    for (const folder of folding.pathTo(f.id)) {
+      let node = folders.get(folder);
+      if (!node) {
+        node = { id: folder, weight: 0, children: [] };
+        folders.set(folder, node);
+        parent.children!.push(node);
+      }
+      parent = node;
+    }
+    parent.children!.push({ id: f.id, weight: f.weight });
+  }
+  const size = 24 * Math.sqrt(Math.max(1, files.length));
+  const tree = hierarchy(root)
+    .sum((d) => (d.children ? 0 : 1))
+    .sort((a, b) => b.value! - a.value! || b.data.weight - a.data.weight || a.data.id.localeCompare(b.data.id));
+  const packed = pack<PackNode>()
+    .size([size, size])
+    .padding((d) => (d.depth === 0 ? 14 : 5))(tree);
+  const positions = new Map<string, { x: number; y: number }>();
+  const regions = new Map<string, Region>();
+  for (const d of packed.descendants()) {
+    if (d.depth === 0) continue;
+    if (d.data.children) regions.set(d.data.id, { x: d.x, y: d.y, r: d.r, depth: d.depth });
+    else positions.set(d.data.id, { x: d.x, y: d.y });
+  }
+  return { positions, regions, size };
 }

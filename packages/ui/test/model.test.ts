@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CodeGraph, GraphNode } from "@adam/core";
-import { assignClusterSlots, buildTree, clusterOf, fileLabels, Folding, groupFolder, groupId, ROOT_CLUSTER } from "../src/model";
+import { sharedPrefix, assignClusterSlots, buildTree, clusterOf, fileLabels, Folding, groupFolder, groupId, ROOT_CLUSTER } from "../src/model";
 
 const graphOf = (ids: string[]): CodeGraph =>
   ({
@@ -36,6 +36,12 @@ describe("assignClusterSlots", () => {
   it("folds clusters beyond the palette into other", () => {
     const ids = Array.from({ length: 10 }, (_, i) => `f${i}/x`);
     expect(assignClusterSlots(graphOf(ids)).size).toBe(7);
+  });
+
+  it("gives tool folders like .github no colour of their own", () => {
+    const slots = assignClusterSlots(graphOf([".github/a", ".github/b", ".github/c", "src/x"]));
+    expect(slots.has(".github")).toBe(false);
+    expect(slots.get("src")).toBe(0);
   });
 });
 
@@ -101,5 +107,13 @@ describe("fileLabels", () => {
     expect(labels.get("packages/ui/src/index.ts")).toBe("ui/…/index.ts");
     expect(labels.get("packages/ui/index.ts")).toBe("ui/index.ts");
     expect(labels.get("index.ts")).toBe("index.ts");
+  });
+});
+
+describe("sharedPrefix", () => {
+  it("finds the dotted prefix most top-level projects share", () => {
+    expect(sharedPrefix(["CPBuild.Domain", "CPBuild.Host", "CPBuild.Shared", ".idea", "docs"])).toBe("CPBuild.");
+    expect(sharedPrefix(["apps/web", "packages/db", "scripts"])).toBe("");
+    expect(sharedPrefix(["A.One", "B.Two", "C.Three"])).toBe("");
   });
 });

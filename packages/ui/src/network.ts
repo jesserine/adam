@@ -14,6 +14,8 @@ import {
   Folding,
   groupFolder,
   isGroupId,
+  isToolFolder,
+  sharedPrefix,
   OTHER_COLOR,
   SENSITIVE_COLOR,
 } from "./model";
@@ -66,6 +68,8 @@ export class NetworkView {
   /** Width of the laid-out graph, to turn node sizes (pixels) into layout units. */
   private extent = 1;
   private labels = new Map<string, string>();
+  /** A dotted prefix most clusters share (`CPBuild.`), left off folder labels on the canvas. */
+  private prefix = "";
   private unitOfFile = new Map<string, string>();
   private slots = new Map<string, number>();
   private filters: NetworkFilters = { hideUnconnected: false, hideTypeOnly: false };
@@ -74,6 +78,7 @@ export class NetworkView {
   private focusLabel: string | undefined;
   private inspected: string | undefined;
   private hovered: string | undefined;
+  private labelQueue: Array<{ text: string; x: number; y: number; rank: number; size: number }> = [];
   private lit: Lit | undefined;
   /** A click on a folder waits out the double-click window, so a double-click only opens the folder. */
   private pendingClick: ReturnType<typeof setTimeout> | undefined;
@@ -148,6 +153,8 @@ export class NetworkView {
       if (isGroupId(node)) this.toggle(node);
     });
     this.sigma.on("clickStage", () => this.clearFocus());
+    this.sigma.on("beforeRender", () => (this.labelQueue = []));
+    this.sigma.on("afterRender", () => this.drawLabels());
     this.sigma.on("enterNode", ({ node }) => {
       container.style.cursor = "pointer";
       this.hovered = node;
@@ -167,6 +174,7 @@ export class NetworkView {
     this.adj = adjacency(data);
     this.folding = new Folding(data.nodes);
     this.labels = fileLabels(data.nodes.map((n) => n.id));
+    this.prefix = sharedPrefix([...new Set(data.nodes.map(clusterOf))]);
     this.slots = assignClusterSlots(data, this.slots);
     if (firstLoad && data.nodes.length <= COLLAPSE_ABOVE) this.expanded = new Set(this.folding.folders());
     this.layout();
@@ -263,8 +271,9 @@ export class NetworkView {
 
   /** A cluster by its full path (`packages/ui`); a folder inside one from the cluster's own name (`ui/components`). */
   private groupName(folder: string, cluster: string): string {
-    if (folder === cluster) return folder;
-    return `${cluster.split("/").at(-1)}${folder.slice(cluster.length)}`;
+    const name = this.prefix && cluster.startsWith(this.prefix) ? cluster.slice(this.prefix.length) : cluster;
+    if (folder === cluster) return name;
+    return `${name.split("/").at(-1)}${folder.slice(cluster.length)}`;
   }
 
   /** Frames what is on screen now, which for a collapsed repo is much less than the whole layout. */
@@ -390,19 +399,21 @@ export class NetworkView {
       }
       const cluster = clusterOf(byId.get(files[0])!);
       const color = this.colorFor(cluster, false);
-      // Folders are the landmarks, so they always keep their label.
+      const tool = isToolFolder(cluster);
+      // Folders are the landmarks, so they always ask for a label; drawLabels() decides which fit.
       this.graph.addNode(unit, {
         x: x / files.length,
         y: y / files.length,
         type: "folder",
         label: `${this.groupName(groupFolder(unit), cluster)}/ · ${files.length}`,
-        size: Math.min(26, 6 + Math.sqrt(files.length) * 1.6),
+        size: tool ? 5 : Math.min(26, 6 + Math.sqrt(files.length) * 1.6),
         cluster,
+        tool,
         connected: files.some((f) => degree(f) > 0),
-        color: this.mix(color, 0.35),
-        borderColor: color,
+        color: this.mix(color, tool ? 0.15 : 0.35),
+        borderColor: tool ? this.mix(color, 0.5) : color,
         forceLabel: true,
-        zIndex: 1,
+        zIndex: tool ? 0 : 1,
       });
     }
 
@@ -504,18 +515,44 @@ export class NetworkView {
 
   // Drawing -----------------------------------------------------------------------------------
 
-  /** Labels get a halo in the background colour, so they stay readable over edges. */
-  private drawLabel(...[ctx, data, settings]: Parameters<NodeLabelDrawingFunction>): void {
+  /**
+   * Sigma asks for labels in no useful order, and folder labels are always asked for, so long
+   * names could pile up. Labels are queued here and drawn after the frame by drawLabels().
+   */
+  private drawLabel(...[, data]: Parameters<NodeLabelDrawingFunction>): void {
     if (!data.label) return;
-    ctx.font = `${settings.labelWeight} ${settings.labelSize}px ${settings.labelFont}`;
-    const x = data.x + data.size + 4;
-    const y = data.y + settings.labelSize / 3;
+    const key = (data as { key?: string }).key ?? "";
+    const has = (attr: string) => this.graph.hasNode(key) && !!this.graph.getNodeAttribute(key, attr);
+    const rank = key === this.inspected || this.lit?.units.has(key) ? 3 : isGroupId(key) && !has("tool") ? 2 : has("tool") ? 0 : 1;
+    this.labelQueue.push({ text: data.label, x: data.x + data.size + 4, y: data.y, rank, size: data.size });
+  }
+
+  /** Draws the queued labels, most important first (focus, then folders, then bigger nodes), skipping any that would overlap one already drawn. Each gets a halo so it reads over edges. */
+  private drawLabels(): void {
+    const queue = this.labelQueue.sort((a, b) => b.rank - a.rank || b.size - a.size);
+    this.labelQueue = [];
+    if (!queue.length) return;
+    const settings = this.sigma.getSettings();
+    const ctx = this.sigma.getCanvases().labels.getContext("2d");
+    if (!ctx) return;
+    const size = settings.labelSize;
+    ctx.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
     ctx.lineJoin = "round";
     ctx.lineWidth = 3;
-    ctx.strokeStyle = this.background();
-    ctx.strokeText(data.label, x, y);
-    ctx.fillStyle = this.ink();
-    ctx.fillText(data.label, x, y);
+    const placed: Array<[number, number, number, number]> = [];
+    const free = (b: number[]) => !placed.some((p) => b[0] < p[2] && b[2] > p[0] && b[1] < p[3] && b[3] > p[1]);
+    for (const l of queue) {
+      const w = ctx.measureText(l.text).width;
+      // Right of the node first; if that is taken, try its left.
+      const left = l.x - 2 * l.size - 8 - w;
+      const x = [l.x, left].find((at) => free([at - 2, l.y - size / 2 - 3, at + w + 2, l.y + size / 2 + 3]));
+      if (x === undefined) continue;
+      placed.push([x - 2, l.y - size / 2 - 3, x + w + 2, l.y + size / 2 + 3]);
+      ctx.strokeStyle = this.background();
+      ctx.strokeText(l.text, x, l.y + size / 3);
+      ctx.fillStyle = this.ink();
+      ctx.fillText(l.text, x, l.y + size / 3);
+    }
   }
 
   /** Hovered and highlighted nodes: a ring and a label chip in the theme's colours (Sigma's default is white on white in dark themes). */

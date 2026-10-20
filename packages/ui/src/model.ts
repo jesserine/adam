@@ -15,6 +15,27 @@ export function clusterOf(node: Pick<GraphNode, "folder">): string {
 }
 
 /**
+ * The dotted prefix most top-level clusters share, as in .NET solutions (`CPBuild.Domain`,
+ * `CPBuild.Host`, ...), so labels can drop it. Empty when there is no such prefix.
+ */
+export function sharedPrefix(clusters: string[]): string {
+  const code = clusters.filter((c) => !isToolFolder(c) && !c.includes("/"));
+  if (code.length < 3) return "";
+  const counts = new Map<string, number>();
+  for (const c of code) {
+    const dot = c.indexOf(".");
+    if (dot > 0 && dot < c.length - 1) counts.set(c.slice(0, dot + 1), (counts.get(c.slice(0, dot + 1)) ?? 0) + 1);
+  }
+  const [prefix, count] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+  return count >= 3 && count >= code.length * 0.6 ? prefix : "";
+}
+
+/** Editor and CI folders (`.idea`, `.vscode`, `.github`): shown, but quieter than code. */
+export function isToolFolder(folder: string): boolean {
+  return folder.startsWith(".");
+}
+
+/**
  * Categorical slots, in fixed order (validated palette: blue, orange, aqua, yellow, magenta,
  * green, violet). Red is kept back for sensitive nodes, so a cluster is never mistaken for one.
  */
@@ -31,7 +52,10 @@ export const OTHER_COLOR = { light: "#9a9a94", dark: "#76766f" };
  */
 export function assignClusterSlots(graph: CodeGraph, previous = new Map<string, number>()): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const n of graph.nodes) counts.set(clusterOf(n), (counts.get(clusterOf(n)) ?? 0) + 1);
+  for (const n of graph.nodes) {
+    const cluster = clusterOf(n);
+    if (!isToolFolder(cluster)) counts.set(cluster, (counts.get(cluster) ?? 0) + 1);
+  }
   const slots = new Map<string, number>();
   for (const [cluster, slot] of previous) if (counts.has(cluster)) slots.set(cluster, slot);
   const free = CLUSTER_COLORS.light.map((_, i) => i).filter((i) => ![...slots.values()].includes(i));

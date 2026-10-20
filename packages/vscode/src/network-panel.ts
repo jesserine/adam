@@ -2,8 +2,10 @@ import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {
+  AI_PROVIDERS,
   analyzeNodeSecurityThreats,
   probeAiProviderKey,
+  type AiProvider,
   type GraphNode,
 } from "@adam/core";
 import { sensitiveReason } from "@adam/core/src/sensitive";
@@ -86,18 +88,22 @@ export class NetworkPanel implements vscode.Disposable {
           result = await this.secretManager.getConfigSummary();
           break;
         case "ai:saveConfig":
+          assertAiProvider(msg.params?.provider);
           await this.secretManager.saveKey(msg.params);
           result = await this.secretManager.getConfigSummary();
           break;
         case "ai:deleteConfig":
+          assertAiProvider(msg.params?.provider);
           await this.secretManager.deleteKey(msg.params.provider);
           result = await this.secretManager.getConfigSummary();
           break;
         case "ai:setActive":
+          assertAiProvider(msg.params?.provider);
           await this.secretManager.setActiveProvider(msg.params.provider);
           result = await this.secretManager.getConfigSummary();
           break;
         case "ai:validateKey": {
+          assertAiProvider(msg.params?.provider);
           const key = msg.params.apiKey || (await this.secretManager.getRawKey(msg.params.provider));
           if (!key) {
             result = {
@@ -155,7 +161,8 @@ export class NetworkPanel implements vscode.Disposable {
       }
       this.post({ type: "response", id: msg.id, ok: true, result });
     } catch (err) {
-      this.post({ type: "response", id: msg.id, ok: false, error: (err as Error).message });
+      const message = err instanceof Error ? err.message : "AI operation failed.";
+      this.post({ type: "response", id: msg.id, ok: false, error: message.slice(0, 240) });
     }
   }
 
@@ -205,5 +212,11 @@ export class NetworkPanel implements vscode.Disposable {
     <script nonce="${nonce}" src="${script}"></script>
   </body>
 </html>`;
+  }
+}
+
+function assertAiProvider(value: unknown): asserts value is AiProvider {
+  if (typeof value !== "string" || !AI_PROVIDERS.includes(value as AiProvider)) {
+    throw new Error("Unsupported AI provider.");
   }
 }

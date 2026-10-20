@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { probeAiProviderKey } from "@adam/core";
+import {
+  analyzeNodeSecurityThreats,
+  probeAiProviderKey,
+  type GraphNode,
+} from "@adam/core";
 import { sensitiveReason } from "@adam/core/src/sensitive";
 import type { ExtensionMessage, WebviewRequest } from "@adam/ui/src/host";
 import type { VsCodeAiSecretManager } from "./ai-secret-manager";
@@ -110,6 +114,42 @@ export class NetworkPanel implements vscode.Disposable {
             );
             result = probeResult;
           }
+          break;
+        }
+        case "ai:analyzeThreats": {
+          if (!msg.params?.nodeId) throw new Error("Missing nodeId");
+          const summary = await this.secretManager.getConfigSummary();
+          const activeProvider = summary.activeProvider;
+          if (!activeProvider) {
+            throw new Error("No active AI provider configured");
+          }
+          const apiKey = await this.secretManager.getRawKey(activeProvider);
+          if (!apiKey) {
+            throw new Error(`No API key configured for provider ${activeProvider}`);
+          }
+          const model = summary.providers[activeProvider]?.selectedModel;
+          const nodeRes = await this.client.request<{
+            node: GraphNode;
+            content: string;
+            masked: boolean;
+            redactions: number;
+          }>("GET", `/api/node?id=${encodeURIComponent(msg.params.nodeId)}`);
+
+          if (nodeRes.node.sensitive) {
+            throw new Error("Sensitive files cannot be sent to an AI model");
+          }
+
+          result = await analyzeNodeSecurityThreats({
+            node: nodeRes.node,
+            content: {
+              content: nodeRes.content,
+              masked: nodeRes.masked,
+              redactions: nodeRes.redactions,
+            },
+            provider: activeProvider,
+            apiKey,
+            model,
+          });
           break;
         }
       }

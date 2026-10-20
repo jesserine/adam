@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { AiConfigSummary, AiValidationResult, CodeGraph } from "@adam/core";
+import type { AiConfigSummary, AiValidationResult, CodeGraph, NodeThreatReport } from "@adam/core";
 import { AdamService } from "../src";
 
 const FIXTURE = path.join(__dirname, "..", "..", "core", "test", "fixtures", "sample-app");
@@ -189,6 +189,112 @@ describe("AdamService", () => {
       const noKeyBody = (await noKeyRes.json()) as AiValidationResult;
       expect(noKeyBody.ok).toBe(false);
       expect(noKeyBody.message).toContain("No API key");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("handles /api/ai/threats security analysis requests", async () => {
+    // 1. Missing nodeId
+    const noNodeRes = await api("/api/ai/threats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(noNodeRes.status).toBe(400);
+
+    // 2. Sensitive node rejected
+    const sensitiveRes = await api("/api/ai/threats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodeId: ".env" }),
+    });
+    expect(sensitiveRes.status).toBe(400);
+    const sensitiveBody = await sensitiveRes.json();
+    expect(sensitiveBody.error).toBe("Sensitive files cannot be sent to an AI model");
+
+    // 3. Unconfigured active provider
+    // First ensure no active provider
+    await api("/api/ai/config", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "claude" }),
+    });
+    const unconfRes = await api("/api/ai/threats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodeId: "src/server.ts" }),
+    });
+    expect(unconfRes.status).toBe(400);
+    const unconfBody = await unconfRes.json();
+    expect(unconfBody.error).toContain("No active AI provider");
+
+    // 4. Save active provider with key and perform successful analysis
+    await api("/api/ai/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "chatgpt",
+        apiKey: "sk-proj-threatTestKey1234567890",
+        setActive: true,
+      }),
+    });
+
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn().mockImplementation((url: string | URL | Request, init?: RequestInit) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      if (urlStr.includes("api.openai.com/v1/chat/completions")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  tool_calls: [
+                    {
+                      function: {
+                        name: "report_security_threats",
+                        arguments: JSON.stringify({
+                          summary: "Missing rate limiting on endpoint",
+                          overallRisk: "medium",
+                          threats: [
+                            {
+                              id: "THREAT-1",
+                              title: "No rate limiting",
+                              category: "denial_of_service",
+                              severity: "medium",
+                              description: "Endpoint is vulnerable to volumetric abuse.",
+                              recommendation: "Apply express-rate-limit middleware.",
+                            },
+                          ],
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        } as unknown as Response);
+      }
+      return originalFetch(url, init);
+    });
+
+    try {
+      const threatRes = await api("/api/ai/threats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodeId: "src/server.ts" }),
+      });
+      expect(threatRes.status).toBe(200);
+      const report = (await threatRes.json()) as NodeThreatReport;
+      expect(report.nodeId).toBe("src/server.ts");
+      expect(report.provider).toBe("chatgpt");
+      expect(report.overallRisk).toBe("medium");
+      expect(report.threats).toHaveLength(1);
+      expect(report.threats[0].title).toBe("No rate limiting");
+      expect(report.threats[0].category).toBe("denial_of_service");
     } finally {
       global.fetch = originalFetch;
     }

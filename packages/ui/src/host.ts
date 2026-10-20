@@ -2,10 +2,12 @@ import type {
   AiConfigSummary,
   AiProvider,
   AiValidationResult,
+  AnalyzeThreatsRequest,
   CodeGraph,
   CodeSymbol,
   DeleteAiConfigRequest,
   GraphNode,
+  NodeThreatReport,
   SaveAiConfigRequest,
   ValidateAiKeyRequest,
 } from "@adam/core";
@@ -45,6 +47,7 @@ export interface Host {
   deleteAiConfig(provider: AiProvider): Promise<AiConfigSummary>;
   setActiveAiProvider(provider: AiProvider): Promise<AiConfigSummary>;
   validateAiKey(req: ValidateAiKeyRequest): Promise<AiValidationResult>;
+  analyzeNodeThreats(req: AnalyzeThreatsRequest): Promise<NodeThreatReport>;
 }
 
 /** Messages exchanged between the webview and the extension. */
@@ -59,7 +62,8 @@ export type WebviewRequest =
   | { type: "request"; id: number; method: "ai:saveConfig"; params: SaveAiConfigRequest }
   | { type: "request"; id: number; method: "ai:deleteConfig"; params: DeleteAiConfigRequest }
   | { type: "request"; id: number; method: "ai:setActive"; params: { provider: AiProvider } }
-  | { type: "request"; id: number; method: "ai:validateKey"; params: ValidateAiKeyRequest };
+  | { type: "request"; id: number; method: "ai:validateKey"; params: ValidateAiKeyRequest }
+  | { type: "request"; id: number; method: "ai:analyzeThreats"; params: AnalyzeThreatsRequest };
 
 export type ExtensionMessage =
   | { type: "response"; id: number; ok: true; result: unknown }
@@ -69,13 +73,13 @@ export type ExtensionMessage =
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type RequestBody = DistributiveOmit<Extract<WebviewRequest, { type: "request" }>, "id">;
 
-interface VsCodeApi {
+export interface VsCodeApi {
   postMessage(message: WebviewRequest): void;
 }
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
-function createVsCodeHost(api: VsCodeApi): Host {
+export function createVsCodeHost(api: VsCodeApi): Host {
   let nextId = 1;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   const listeners: Array<() => void> = [];
@@ -111,10 +115,11 @@ function createVsCodeHost(api: VsCodeApi): Host {
     deleteAiConfig: (provider) => request({ type: "request", method: "ai:deleteConfig", params: { provider } }),
     setActiveAiProvider: (provider) => request({ type: "request", method: "ai:setActive", params: { provider } }),
     validateAiKey: (req) => request({ type: "request", method: "ai:validateKey", params: req }),
+    analyzeNodeThreats: (req) => request({ type: "request", method: "ai:analyzeThreats", params: req }),
   };
 }
 
-function createBrowserHost(): Host {
+export function createBrowserHost(): Host {
   // The token rides in the URL fragment, which browsers never send to a server or a referrer.
   const token = new URLSearchParams(location.hash.slice(1)).get("token") ?? "";
   const call = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
@@ -153,6 +158,12 @@ function createBrowserHost(): Host {
       }),
     validateAiKey: (req) =>
       call("/api/ai/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      }),
+    analyzeNodeThreats: (req) =>
+      call("/api/ai/threats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),

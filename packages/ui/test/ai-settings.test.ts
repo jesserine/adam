@@ -347,6 +347,7 @@ describe("AI Settings Dialog Component", () => {
           latencyMs: 120,
         };
       }),
+      analyzeNodeThreats: vi.fn(),
     };
   });
 

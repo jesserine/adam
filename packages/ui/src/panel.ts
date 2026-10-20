@@ -1,4 +1,13 @@
-import type { CodeSymbol, GraphEdge, GraphNode } from "@adam/core";
+import type {
+  CodeSymbol,
+  GraphEdge,
+  GraphNode,
+  NodeThreat,
+  NodeThreatReport,
+  ThreatCategory,
+  ThreatSeverity,
+} from "@adam/core";
+import { getProviderDisplayName, openAiSettingsDialog } from "./ai-settings";
 import { formatBytes, h } from "./dom";
 import type { Host } from "./host";
 import type { UnitLink } from "./network";
@@ -15,7 +24,7 @@ const KIND_LABEL: Record<CodeSymbol["kind"], string> = {
   variable: "const",
 };
 
-interface PanelContext {
+export interface PanelContext {
   host: Host;
   incoming: GraphEdge[];
   outgoing: GraphEdge[];
@@ -23,6 +32,9 @@ interface PanelContext {
   /** Extra buttons for the panel header, such as collapsing the node into its folder. */
   actions?: HTMLElement[];
 }
+
+export const threatCache = new Map<string, NodeThreatReport>();
+export const patchedThreats = new Set<string>();
 
 /**
  * The node panel: what a file is, what it connects to, and its symbols collapsed by default.
@@ -72,6 +84,10 @@ export function renderNodePanel(container: HTMLElement, node: GraphNode, ctx: Pa
     );
     if (node.envDeclares.length) container.append(section("Declares (values hidden)", tagList(node.envDeclares)));
   }
+
+  const threatsSection = h("section", { class: "panel-section panel-threats-section" });
+  renderThreatsSection(threatsSection, node, ctx);
+  container.append(threatsSection);
 
   if (node.symbols.length) {
     const list = h("div", { class: "symbols" });
@@ -243,4 +259,439 @@ function linkList(links: UnitLink[], empty: string, ctx: GroupPanelContext): HTM
       ),
     ),
   );
+}
+
+export function renderThreatsSection(
+  container: HTMLElement,
+  node: GraphNode,
+  ctx: PanelContext,
+): void {
+  // If the node is sensitive, security analysis is blocked
+  if (node.sensitive) {
+    container.replaceChildren(
+      h("h3", {}, "Security & Threats"),
+      h(
+        "p",
+        { class: "notice warn threat-sensitive-notice" },
+        "🔒 Security Analysis unavailable: Sensitive files are protected and never sent to external AI models.",
+      ),
+    );
+    return;
+  }
+
+  let activeScanTimers: { stop: () => void } | null = null;
+
+  function stopActiveScanTimers() {
+    if (activeScanTimers) {
+      activeScanTimers.stop();
+      activeScanTimers = null;
+    }
+  }
+
+  stopActiveScanTimers();
+
+  const cached = threatCache.get(node.id);
+  if (cached) {
+    renderScanned(cached);
+  } else {
+    renderUnscanned();
+  }
+
+  function renderUnscanned(errorBanner?: HTMLElement) {
+    stopActiveScanTimers();
+    const children: (HTMLElement | string)[] = [h("h3", {}, "Security & Threats")];
+    if (errorBanner) children.push(errorBanner);
+    children.push(
+      h(
+        "button",
+        {
+          class: "primary threat-scan-btn",
+          title: "Audit this file for vulnerabilities, loopholes, and attack vectors",
+          onclick: () => void startScan(false),
+        },
+        "🛡️ Trace Potential Threats",
+      ),
+      h(
+        "p",
+        { class: "threat-scan-subtitle muted small" },
+        "Audit this file for vulnerabilities, loopholes, and attack vectors",
+      ),
+    );
+    container.replaceChildren(...children);
+  }
+
+  function startScan(forceRefresh: boolean) {
+    stopActiveScanTimers();
+
+    let providerName = "Active AI Provider";
+    let modelName = "";
+
+    const stages = [
+      {
+        icon: "🔍",
+        step: "1/4",
+        title: "Scanning AST & scrubbing sensitive secrets…",
+        detail: "Verifying local boundaries and redacting tokens/credentials",
+        pct: 25,
+      },
+      {
+        icon: "🧩",
+        step: "2/4",
+        title: "Synthesizing dependencies, env & symbol scope…",
+        detail: "Enriching graph context with declared packages, envReads, and symbol scope",
+        pct: 50,
+      },
+      {
+        icon: "🤖",
+        step: "3/4",
+        title: () => `Querying ${providerName}${modelName ? ` (${modelName})` : ""} threat model…`,
+        detail: "Executing 'report_security_threats' structured tool call over secure HTTPS",
+        pct: 75,
+      },
+      {
+        icon: "🛡️",
+        step: "4/4",
+        title: "Evaluating threat vectors, CWEs & remediation…",
+        detail: "Validating severity rankings, line references, and actionable patches",
+        pct: 90,
+      },
+    ];
+
+    let currentStageIndex = 0;
+    const startTime = Date.now();
+
+    const getStageTitle = (stage: (typeof stages)[0]) =>
+      typeof stage.title === "function" ? stage.title() : stage.title;
+
+    const stageIconEl = h("span", { class: "threat-stage-icon" }, stages[0].icon);
+    const stageTitleEl = h("span", { class: "threat-stage-title" }, getStageTitle(stages[0]));
+    const stageBadgeEl = h("span", { class: "threat-stage-badge" }, stages[0].step);
+    const stageTimerEl = h("span", { class: "threat-stage-timer" }, "0.0s");
+    const stageDetailEl = h("div", { class: "threat-stage-detail" }, stages[0].detail);
+    const progressBarFill = h("div", { class: "threat-progress-fill" });
+    const setProgressWidth = (pct: number) => {
+      try {
+        if ((progressBarFill as HTMLElement).style) {
+          (progressBarFill as HTMLElement).style.width = `${pct}%`;
+        }
+      } catch {}
+      progressBarFill.setAttribute("style", `width: ${pct}%`);
+    };
+    setProgressWidth(stages[0].pct);
+
+    const noticeEl = h(
+      "div",
+      { class: "threat-loading-notice" },
+      h(
+        "div",
+        { class: "threat-stage-head" },
+        h("div", { class: "threat-stage-title-wrap" }, stageIconEl, stageTitleEl),
+        h("div", { class: "threat-stage-meta" }, stageBadgeEl, stageTimerEl),
+      ),
+      stageDetailEl,
+      h("div", { class: "threat-progress-bar" }, progressBarFill),
+    );
+
+    container.replaceChildren(
+      h("h3", {}, "Security & Threats"),
+      h(
+        "div",
+        { class: "threat-loading-state" },
+        h(
+          "button",
+          {
+            class: "primary threat-scan-btn",
+            disabled: true,
+            title: "Audit this file for vulnerabilities, loopholes, and attack vectors",
+          },
+          "🛡️ Trace Potential Threats",
+        ),
+        noticeEl,
+      ),
+    );
+
+    const updateStageUI = (index: number) => {
+      const stage = stages[index];
+      stageIconEl.textContent = stage.icon;
+      stageTitleEl.textContent = typeof stage.title === "function" ? stage.title() : stage.title;
+      stageBadgeEl.textContent = stage.step;
+      stageDetailEl.textContent = stage.detail;
+      setProgressWidth(stage.pct);
+    };
+
+    const timeouts = [
+      setTimeout(() => {
+        currentStageIndex = 1;
+        updateStageUI(1);
+      }, 700),
+      setTimeout(() => {
+        currentStageIndex = 2;
+        updateStageUI(2);
+      }, 1600),
+      setTimeout(() => {
+        currentStageIndex = 3;
+        updateStageUI(3);
+      }, 3200),
+    ];
+
+    const timerInterval = setInterval(() => {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      stageTimerEl.textContent = `${elapsed}s`;
+    }, 100);
+
+    activeScanTimers = {
+      stop: () => {
+        timeouts.forEach((t) => clearTimeout(t));
+        clearInterval(timerInterval);
+      },
+    };
+
+    if (typeof ctx.host.getAiConfig === "function") {
+      ctx.host
+        .getAiConfig()
+        .then((cfg) => {
+          if (cfg?.activeProvider) {
+            providerName = getProviderDisplayName(cfg.activeProvider);
+            const status = cfg.providers?.[cfg.activeProvider];
+            if (status?.selectedModel) {
+              modelName = status.selectedModel;
+            }
+            if (currentStageIndex === 2) {
+              updateStageUI(2);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+
+    ctx.host
+      .analyzeNodeThreats({
+        nodeId: node.id,
+        forceRefresh,
+      })
+      .then((report) => {
+        stopActiveScanTimers();
+        threatCache.set(node.id, report);
+        renderScanned(report);
+      })
+      .catch((err: any) => {
+        stopActiveScanTimers();
+        renderError(err);
+      });
+  }
+
+  function renderError(err: any) {
+    const errMsg = err?.message || "Failed to analyze security threats.";
+    const isUnconfigured =
+      err?.code === "UNCONFIGURED" ||
+      /unconfigured|no active ai provider|no api key|not configured/i.test(errMsg);
+
+    const errorBanner = h(
+      "div",
+      { class: "threat-error-banner notice danger" },
+      h("p", { class: "threat-error-text" }, errMsg),
+      isUnconfigured
+        ? h(
+            "button",
+            {
+              class: "primary threat-config-btn",
+              onclick: () => {
+                void openAiSettingsDialog(ctx.host, (summary) => {
+                  if (summary.activeProvider && summary.providers?.[summary.activeProvider]?.configured) {
+                    void startScan(false);
+                  }
+                });
+              },
+            },
+            "✨ Configure AI Provider",
+          )
+        : null,
+    );
+
+    renderUnscanned(errorBanner);
+  }
+
+  function renderScanned(report: NodeThreatReport) {
+    const severities: ThreatSeverity[] = ["critical", "high", "medium", "low", "info"];
+    const breakdownChips: HTMLElement[] = [];
+    for (const sev of severities) {
+      const count = report.threats.filter((t) => t.severity.toLowerCase() === sev).length;
+      if (count > 0) {
+        breakdownChips.push(
+          h(
+            "span",
+            { class: `chip threat-severity-badge ${sev} severity-${sev}` },
+            `${count} ${sev}`,
+          ),
+        );
+      }
+    }
+
+    const headTitle = h("h3", {}, `Security Threats (${report.threats.length})`);
+    const headerEl = h(
+      "div",
+      { class: "threats-header" },
+      headTitle,
+      breakdownChips.length > 0 ? h("div", { class: "chips" }, ...breakdownChips) : null,
+    );
+
+    const rescanBtn = h(
+      "button",
+      {
+        class: "threat-rescan-btn",
+        title: "Re-run threat analysis on this file",
+        onclick: () => void startScan(true),
+      },
+      "🔄 Re-scan",
+    );
+
+    const clearBtn = h(
+      "button",
+      {
+        class: "threat-clear-btn",
+        title: "Clear threat findings for this file and return to unscanned state",
+        onclick: () => {
+          threatCache.delete(node.id);
+          for (const key of Array.from(patchedThreats)) {
+            if (key.startsWith(`${node.id}:`)) {
+              patchedThreats.delete(key);
+            }
+          }
+          renderUnscanned();
+        },
+      },
+      "🧹 Clear Threats",
+    );
+
+    const actionsRow = h("div", { class: "threat-actions-row" }, rescanBtn, clearBtn);
+
+    if (report.threats.length === 0) {
+      const zeroCallout = h(
+        "div",
+        { class: "threat-summary-callout success" },
+        "✓ No security vulnerabilities or loopholes detected in this node.",
+      );
+      container.replaceChildren(headerEl, actionsRow, zeroCallout);
+      return;
+    }
+
+    const summaryCallout = h(
+      "div",
+      { class: "threat-summary-callout" },
+      report.summary,
+    );
+
+    const listEl = h("div", { class: "threat-cards-list" });
+    for (const threat of report.threats) {
+      const patchKey = `${node.id}:${threat.id}`;
+      const isPatched = patchedThreats.has(patchKey);
+      const card = renderThreatCard(
+        threat,
+        node,
+        ctx,
+        () => {
+          if (patchedThreats.has(patchKey)) {
+            patchedThreats.delete(patchKey);
+          } else {
+            patchedThreats.add(patchKey);
+          }
+          renderScanned(report);
+        },
+        isPatched,
+      );
+      listEl.append(card);
+    }
+
+    container.replaceChildren(headerEl, actionsRow, summaryCallout, listEl);
+  }
+}
+
+function renderThreatCard(
+  threat: NodeThreat,
+  node: GraphNode,
+  ctx: PanelContext,
+  onTogglePatch: () => void,
+  isPatched: boolean,
+): HTMLElement {
+  const card = h("div", { class: `threat-card${isPatched ? " patched" : ""}` });
+
+  const sevLower = threat.severity.toLowerCase();
+  const metaRow = h(
+    "div",
+    { class: "threat-card-meta" },
+    h(
+      "span",
+      { class: `threat-severity-badge ${sevLower} severity-${sevLower}` },
+      threat.severity.toUpperCase(),
+    ),
+    h(
+      "span",
+      { class: "threat-category-chip chip" },
+      formatThreatCategory(threat.category),
+    ),
+  );
+
+  const line = threat.location?.line ?? threat.location?.lineStart;
+  if (typeof line === "number") {
+    const locBtn = h(
+      "button",
+      {
+        class: "threat-location-link link",
+        title: `Open ${node.id} at line ${line}`,
+        onclick: (e) => {
+          e.stopPropagation();
+          ctx.host.openFile?.(node.id, line);
+        },
+      },
+      `Line ${line}`,
+    );
+    metaRow.append(locBtn);
+  }
+
+  if (isPatched) {
+    const patchedBadge = h("span", { class: "threat-patched-badge chip success" }, "✓ Patched");
+    metaRow.append(patchedBadge);
+  }
+
+  const titleEl = h("h4", { class: "threat-title" }, threat.title);
+  if (threat.cwe) {
+    titleEl.append(h("span", { class: "threat-cwe muted small" }, ` (${threat.cwe})`));
+  }
+
+  const descEl = h("p", { class: "threat-description" }, threat.description);
+
+  const remediationBox = h(
+    "div",
+    { class: "threat-remediation-box" },
+    h("strong", {}, "💡 Remediation: "),
+    threat.recommendation,
+  );
+
+  const patchBtn = h(
+    "button",
+    {
+      class: `threat-patch-btn${isPatched ? " patched" : ""}`,
+      onclick: onTogglePatch,
+    },
+    isPatched ? "Unmark as Patched" : "✓ Mark as Patched",
+  );
+
+  const actionsRow = h("div", { class: "threat-card-actions" }, patchBtn);
+
+  card.append(metaRow, titleEl, descEl, remediationBox, actionsRow);
+  return card;
+}
+
+function formatThreatCategory(category: ThreatCategory | string): string {
+  const map: Record<string, string> = {
+    injection: "Injection",
+    auth: "Auth",
+    sensitive_data: "Sensitive Data",
+    supply_chain: "Supply Chain",
+    crypto: "Crypto",
+    misconfiguration: "Misconfiguration",
+    denial_of_service: "Denial of Service",
+    other: "Other",
+  };
+  return map[category] ?? (category.charAt(0).toUpperCase() + category.slice(1));
 }

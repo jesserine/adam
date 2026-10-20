@@ -140,3 +140,63 @@ export interface AiValidationResult {
   testedModel?: string;
   latencyMs?: number;
 }
+
+/** Security Threat Severity Levels */
+export type ThreatSeverity = "critical" | "high" | "medium" | "low" | "info";
+
+/** Security Threat Categories */
+export type ThreatCategory =
+  | "injection"
+  | "auth"
+  | "sensitive_data"
+  | "supply_chain"
+  | "crypto"
+  | "misconfiguration"
+  | "denial_of_service"
+  | "other";
+
+export interface NodeThreatLocation {
+  line?: number;
+  lineStart?: number;
+  lineEnd?: number;
+  symbolName?: string;
+}
+
+export interface NodeThreat {
+  id: string;
+  title: string;
+  category: ThreatCategory;
+  severity: ThreatSeverity;
+  description: string;
+  location?: NodeThreatLocation;
+  cwe?: string;
+  recommendation: string;
+}
+
+export interface NodeThreatReport {
+  nodeId: string;
+  provider: AiProvider;
+  model: string;
+  analyzedAt: string;
+  summary: string;
+  threats: NodeThreat[];
+  overallRisk: ThreatSeverity;
+  masked: boolean;
+  redactions: number;
+}
+
+export interface AnalyzeThreatsRequest {
+  nodeId: string;
+  forceRefresh?: boolean;
+}
+
+export class ThreatAnalysisError extends Error {
+  constructor(
+    message: string,
+    readonly code?: "UNCONFIGURED" | "SENSITIVE_NODE" | "PROVIDER_ERROR" | "PARSE_ERROR" | "INVALID_REQUEST",
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "ThreatAnalysisError";
+  }
+}

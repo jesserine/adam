@@ -4,12 +4,15 @@ import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 import {
+  analyzeNodeSecurityThreats,
   indexRepository,
   probeAiProviderKey,
   readNodeContent,
   readSymbolCode,
+  ThreatAnalysisError,
   type AiProvider,
   type AiValidationResult,
+  type AnalyzeThreatsRequest,
   type CodeGraph,
   type DeleteAiConfigRequest,
   type IndexOptions,
@@ -226,6 +229,40 @@ export class AdamService {
         const result = await probeAiProviderKey(body.provider, key);
         await this.aiStore.recordTestResult(body.provider, result.ok, result.ok ? undefined : result.message);
         return sendJson(res, 200, result);
+      }
+      case "POST /api/ai/threats": {
+        const body = await readJsonBody<AnalyzeThreatsRequest>(req);
+        if (!body.nodeId) throw new HttpError(400, "Missing nodeId");
+        const node = await this.findNode(body.nodeId);
+        if (node.sensitive) {
+          throw new HttpError(400, "Sensitive files cannot be sent to an AI model");
+        }
+        const summary = await this.aiStore.getConfigSummary();
+        const activeProvider = summary.activeProvider;
+        if (!activeProvider) {
+          throw new HttpError(400, "No active AI provider configured");
+        }
+        const apiKey = await this.aiStore.getRawKey(activeProvider);
+        if (!apiKey) {
+          throw new HttpError(400, `No API key configured for provider ${activeProvider}`);
+        }
+        const selectedModel = summary.providers[activeProvider]?.selectedModel;
+        const nodeContent = readNodeContent(this.root, node);
+        try {
+          const report = await analyzeNodeSecurityThreats({
+            node,
+            content: nodeContent,
+            provider: activeProvider,
+            apiKey,
+            model: selectedModel,
+          });
+          return sendJson(res, 200, report);
+        } catch (err: unknown) {
+          if (err instanceof ThreatAnalysisError) {
+            throw new HttpError(err.status ?? 500, err.message);
+          }
+          throw err;
+        }
       }
       default:
         throw new HttpError(404, "Not found");

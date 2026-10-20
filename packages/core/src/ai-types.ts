@@ -28,13 +28,13 @@ export const AI_PROVIDER_METADATA: Record<AiProvider, AiProviderMeta> = {
     placeholder: "sk-proj-...",
     keyPrefixHint: "sk-",
     consoleUrl: "https://platform.openai.com/api-keys",
-    defaultModel: "gpt-6.1-sol",
+    defaultModel: "gpt-5.6-sol",
     availableModels: [
-      "gpt-6.1-sol",
-      "gpt-6-astra",
-      "gpt-6-luna",
-      "gpt-5.6",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
       "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.4",
     ],
   },
   claude: {

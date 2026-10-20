@@ -247,15 +247,11 @@ function sanitizeReport(
     return threat;
   });
 
-  let overallRisk: ThreatSeverity = "info";
-  const rawRisk = typeof parsed?.overallRisk === "string" ? parsed.overallRisk.toLowerCase() : "";
-  if (VALID_SEVERITIES.includes(rawRisk as ThreatSeverity)) {
-    overallRisk = rawRisk as ThreatSeverity;
-  } else if (threats.length > 0) {
-    overallRisk = threats.reduce<ThreatSeverity>((highest, current) => {
-      return SEVERITY_RANK[current.severity] > SEVERITY_RANK[highest] ? current.severity : highest;
-    }, "info");
-  }
+  // Threat severities are the source of truth. Model-provided overallRisk can
+  // contradict individual findings, so derive the report risk from normalized threats.
+  const overallRisk = threats.reduce<ThreatSeverity>((highest, current) => {
+    return SEVERITY_RANK[current.severity] > SEVERITY_RANK[highest] ? current.severity : highest;
+  }, "info");
 
   const summary =
     typeof parsed?.summary === "string" && parsed.summary.trim()
@@ -313,7 +309,7 @@ export async function analyzeNodeSecurityThreats(
 
     switch (provider) {
       case "gemini": {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
         const body = {
           contents: [
             {
@@ -349,18 +345,14 @@ export async function analyzeNodeSecurityThreats(
           headers: {
             "Content-Type": "application/json",
             "User-Agent": "Adam-Code-Network/1.0",
+            "x-goog-api-key": trimmedKey,
           },
           body: JSON.stringify(body),
           signal: controller.signal,
         });
 
         if (!res.ok) {
-          const errData = (await res.json().catch(() => ({}))) as Record<string, any>;
-          const msg =
-            errData.error?.message ||
-            errData.message ||
-            `Gemini API failed with status ${res.status}: ${res.statusText}`;
-          throw new ThreatAnalysisError(msg, "PROVIDER_ERROR", res.status);
+          throw new ThreatAnalysisError(`Gemini request failed (HTTP ${res.status}). Check the API key and selected model, then try again.`, "PROVIDER_ERROR", res.status);
         }
 
         const data = (await res.json()) as any;
@@ -485,12 +477,7 @@ export async function analyzeNodeSecurityThreats(
         });
 
         if (!res.ok) {
-          const errData = (await res.json().catch(() => ({}))) as Record<string, any>;
-          const msg =
-            errData.error?.message ||
-            errData.message ||
-            `Anthropic API failed with status ${res.status}: ${res.statusText}`;
-          throw new ThreatAnalysisError(msg, "PROVIDER_ERROR", res.status);
+          throw new ThreatAnalysisError(`Anthropic request failed (HTTP ${res.status}). Check the API key and selected model, then try again.`, "PROVIDER_ERROR", res.status);
         }
 
         const data = (await res.json()) as any;

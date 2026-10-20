@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { CodeGraph } from "@adam/core";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { AiConfigSummary, AiValidationResult, CodeGraph } from "@adam/core";
 import { AdamService } from "../src";
 
 const FIXTURE = path.join(__dirname, "..", "..", "core", "test", "fixtures", "sample-app");
@@ -91,5 +91,106 @@ describe("AdamService", () => {
   it("serves the UI without a token, and nothing outside it", async () => {
     expect((await fetch(`${base}/`)).status).toBe(200);
     expect((await fetch(`${base}/..%2F..%2Fetc%2Fpasswd`)).status).toBe(404);
+  });
+
+  it("manages AI provider configuration securely", async () => {
+    // 1. Initial config should have no configured providers
+    const getRes = await api("/api/ai/config");
+    expect(getRes.status).toBe(200);
+    const initialSummary = (await getRes.json()) as AiConfigSummary;
+    expect(initialSummary.activeProvider).toBeUndefined();
+    expect(initialSummary.providers.chatgpt.configured).toBe(false);
+    expect(initialSummary.providers.claude.configured).toBe(false);
+    expect(initialSummary.providers.grok.configured).toBe(false);
+    expect(initialSummary.providers.gemini.configured).toBe(false);
+
+    // 2. Save a key for claude
+    const saveRes = await api("/api/ai/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "claude",
+        apiKey: "sk-ant-api03-abcdefghijklmn1234",
+        selectedModel: "claude-3-7-sonnet-20250219",
+      }),
+    });
+    expect(saveRes.status).toBe(200);
+    const savedSummary = (await saveRes.json()) as AiConfigSummary;
+    expect(savedSummary.activeProvider).toBe("claude");
+    expect(savedSummary.providers.claude.configured).toBe(true);
+    expect(savedSummary.providers.claude.maskedKey).toBe("sk-ant-...1234");
+    // Ensure raw key was never returned
+    expect(JSON.stringify(savedSummary)).not.toContain("abcdefghijklmn");
+
+    // 3. Save a second key (chatgpt) without setting active
+    await api("/api/ai/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "chatgpt",
+        apiKey: "sk-proj-openai9876543210zyxwvu",
+      }),
+    });
+
+    // 4. Set chatgpt as active provider
+    const activeRes = await api("/api/ai/active", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "chatgpt" }),
+    });
+    const activeSummary = (await activeRes.json()) as AiConfigSummary;
+    expect(activeSummary.activeProvider).toBe("chatgpt");
+
+    // 5. Delete active provider
+    const deleteRes = await api("/api/ai/config", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "chatgpt" }),
+    });
+    const deleteSummary = (await deleteRes.json()) as AiConfigSummary;
+    expect(deleteSummary.activeProvider).toBeUndefined();
+    expect(deleteSummary.providers.chatgpt.configured).toBe(false);
+    expect(deleteSummary.providers.chatgpt.maskedKey).toBeUndefined();
+    // Claude should still be configured
+    expect(deleteSummary.providers.claude.configured).toBe(true);
+
+    // 6. Test validation endpoint
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn().mockImplementation((url: string | URL | Request, init?: RequestInit) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      if (urlStr.includes("anthropic.com")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [] }),
+        } as unknown as Response);
+      }
+      return originalFetch(url, init);
+    });
+
+    try {
+      // Validate stored claude key
+      const valRes = await api("/api/ai/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "claude" }),
+      });
+      expect(valRes.status).toBe(200);
+      const valBody = (await valRes.json()) as AiValidationResult;
+      expect(valBody.ok).toBe(true);
+      expect(valBody.provider).toBe("claude");
+
+      // Validate provider with no key stored
+      const noKeyRes = await api("/api/ai/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "gemini" }),
+      });
+      const noKeyBody = (await noKeyRes.json()) as AiValidationResult;
+      expect(noKeyBody.ok).toBe(false);
+      expect(noKeyBody.message).toContain("No API key");
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 });

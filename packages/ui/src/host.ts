@@ -1,4 +1,14 @@
-import type { CodeGraph, CodeSymbol, GraphNode } from "@adam/core";
+import type {
+  AiConfigSummary,
+  AiProvider,
+  AiValidationResult,
+  CodeGraph,
+  CodeSymbol,
+  DeleteAiConfigRequest,
+  GraphNode,
+  SaveAiConfigRequest,
+  ValidateAiKeyRequest,
+} from "@adam/core";
 
 export interface NodeResponse {
   node: GraphNode;
@@ -28,6 +38,13 @@ export interface Host {
   onGraphChanged(listener: () => void): void;
   /** Opens the file in a real editor for manual editing. Absent when there is no editor. */
   openFile?(path: string, line?: number): void;
+
+  // --- AI Provider & Key Management ---
+  getAiConfig(): Promise<AiConfigSummary>;
+  saveAiConfig(req: SaveAiConfigRequest): Promise<AiConfigSummary>;
+  deleteAiConfig(provider: AiProvider): Promise<AiConfigSummary>;
+  setActiveAiProvider(provider: AiProvider): Promise<AiConfigSummary>;
+  validateAiKey(req: ValidateAiKeyRequest): Promise<AiValidationResult>;
 }
 
 /** Messages exchanged between the webview and the extension. */
@@ -36,7 +53,13 @@ export type WebviewRequest =
   | { type: "request"; id: number; method: "node"; params: { id: string } }
   | { type: "request"; id: number; method: "symbol"; params: { node: string; id: string } }
   | { type: "request"; id: number; method: "reindex" }
-  | { type: "openFile"; path: string; line?: number };
+  | { type: "openFile"; path: string; line?: number }
+  // --- AI Config Methods ---
+  | { type: "request"; id: number; method: "ai:getConfig" }
+  | { type: "request"; id: number; method: "ai:saveConfig"; params: SaveAiConfigRequest }
+  | { type: "request"; id: number; method: "ai:deleteConfig"; params: DeleteAiConfigRequest }
+  | { type: "request"; id: number; method: "ai:setActive"; params: { provider: AiProvider } }
+  | { type: "request"; id: number; method: "ai:validateKey"; params: ValidateAiKeyRequest };
 
 export type ExtensionMessage =
   | { type: "response"; id: number; ok: true; result: unknown }
@@ -83,6 +106,11 @@ function createVsCodeHost(api: VsCodeApi): Host {
     reindex: () => request({ type: "request", method: "reindex" }),
     onGraphChanged: (l) => listeners.push(l),
     openFile: (path, line) => api.postMessage({ type: "openFile", path, line }),
+    getAiConfig: () => request({ type: "request", method: "ai:getConfig" }),
+    saveAiConfig: (req) => request({ type: "request", method: "ai:saveConfig", params: req }),
+    deleteAiConfig: (provider) => request({ type: "request", method: "ai:deleteConfig", params: { provider } }),
+    setActiveAiProvider: (provider) => request({ type: "request", method: "ai:setActive", params: { provider } }),
+    validateAiKey: (req) => request({ type: "request", method: "ai:validateKey", params: req }),
   };
 }
 
@@ -104,6 +132,31 @@ function createBrowserHost(): Host {
       const events = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
       events.addEventListener("graph", () => listener());
     },
+    getAiConfig: () => call("/api/ai/config"),
+    saveAiConfig: (req) =>
+      call("/api/ai/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      }),
+    deleteAiConfig: (provider) =>
+      call("/api/ai/config", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      }),
+    setActiveAiProvider: (provider) =>
+      call("/api/ai/active", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      }),
+    validateAiKey: (req) =>
+      call("/api/ai/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      }),
   };
 }
 

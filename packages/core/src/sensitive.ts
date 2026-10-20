@@ -45,7 +45,7 @@ const SECRET_PATTERNS: SecretPattern[] = [
   { name: "Slack token", regex: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g },
   { name: "Stripe secret key", regex: /\b(?:sk|rk)_live_[A-Za-z0-9]{20,}\b/g },
   { name: "API key", regex: /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{32,}\b/g },
-  { name: "Google API key", regex: /\bAIza[0-9A-Za-z_-]{35}\b/g },
+  { name: "Google API key", regex: /\b(?:AIza[0-9A-Za-z_-]{35}|AQ\.[0-9A-Za-z_.-]{20,})\b/g },
   { name: "JWT", regex: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
   {
     name: "connection string password",

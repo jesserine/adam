@@ -1,4 +1,5 @@
-import type { CodeGraph } from "@adam/core";
+import type { AiConfigSummary, CodeGraph } from "@adam/core";
+import { getAiButtonInfo, openAiSettingsDialog } from "./ai-settings";
 import { h } from "./dom";
 import { createHost } from "./host";
 import { adjacency, buildTree, isGroupId, type TreeEntry } from "./model";
@@ -40,6 +41,31 @@ const panelEl = h("aside", { class: "panel", hidden: true });
 const statusEl = h("div", { class: "status", hidden: true });
 const focusBar = h("div", { class: "focus-bar", hidden: true });
 
+const aiButton = h(
+  "button",
+  {
+    class: "ghost ai-settings-btn",
+    title: "Configure AI providers & API keys",
+    onclick: () => void openAiSettingsDialog(host, (summary) => void updateAiButton(summary)),
+  },
+  "✨ Configure AI",
+);
+
+async function updateAiButton(summary?: AiConfigSummary): Promise<void> {
+  try {
+    const config = summary ?? (await host.getAiConfig());
+    const info = getAiButtonInfo(config);
+    aiButton.replaceChildren();
+    if (info.isActive) {
+      aiButton.append(h("span", { class: "ai-active-dot", "aria-hidden": "true" }), info.label);
+    } else {
+      aiButton.textContent = info.label;
+    }
+  } catch {
+    aiButton.textContent = "✨ Configure AI";
+  }
+}
+
 document.body.append(
   h(
     "div",
@@ -57,6 +83,7 @@ document.body.append(
       h("button", { class: "ghost", onclick: () => network.expandAll(), title: "Show every file" }, "Expand all"),
       h("button", { class: "ghost", onclick: () => network.collapseAll(), title: "Fold every folder back into its cluster" }, "Collapse all"),
       h("button", { class: "ghost", onclick: () => network.fit(), title: "Fit what is on screen" }, "Fit"),
+      aiButton,
       stats,
     ),
     h("main", { class: "main" }, h("div", { class: "canvas" }, networkEl, treeEl, focusBar, legend, statusEl), panelEl),
@@ -244,3 +271,4 @@ async function reindex(): Promise<void> {
 
 host.onGraphChanged(() => void load());
 void load();
+void updateAiButton();

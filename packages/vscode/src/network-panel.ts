@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { probeAiProviderKey } from "@adam/core";
 import { sensitiveReason } from "@adam/core/src/sensitive";
 import type { ExtensionMessage, WebviewRequest } from "@adam/ui/src/host";
+import type { VsCodeAiSecretManager } from "./ai-secret-manager";
 import type { ServiceClient } from "./service-client";
 
 /** The full-window network view for one workspace folder. */
@@ -10,14 +12,18 @@ export class NetworkPanel implements vscode.Disposable {
   private static readonly panels = new Map<string, NetworkPanel>();
   private readonly disposables: vscode.Disposable[] = [];
 
-  static show(extensionUri: vscode.Uri, client: ServiceClient): void {
+  static show(
+    extensionUri: vscode.Uri,
+    client: ServiceClient,
+    secretManager: VsCodeAiSecretManager,
+  ): void {
     const key = client.folder.uri.toString();
     const existing = NetworkPanel.panels.get(key);
     if (existing) {
       existing.panel.reveal();
       return;
     }
-    NetworkPanel.panels.set(key, new NetworkPanel(extensionUri, client));
+    NetworkPanel.panels.set(key, new NetworkPanel(extensionUri, client, secretManager));
   }
 
   private readonly panel: vscode.WebviewPanel;
@@ -25,6 +31,7 @@ export class NetworkPanel implements vscode.Disposable {
   private constructor(
     extensionUri: vscode.Uri,
     private readonly client: ServiceClient,
+    private readonly secretManager: VsCodeAiSecretManager,
   ) {
     const uiRoot = vscode.Uri.joinPath(extensionUri, "dist", "ui");
     this.panel = vscode.window.createWebviewPanel("adam.network", `Adam: ${client.folder.name}`, vscode.ViewColumn.One, {
@@ -71,6 +78,40 @@ export class NetworkPanel implements vscode.Disposable {
         case "reindex":
           result = await this.client.request("POST", "/api/reindex");
           break;
+        case "ai:getConfig":
+          result = await this.secretManager.getConfigSummary();
+          break;
+        case "ai:saveConfig":
+          await this.secretManager.saveKey(msg.params);
+          result = await this.secretManager.getConfigSummary();
+          break;
+        case "ai:deleteConfig":
+          await this.secretManager.deleteKey(msg.params.provider);
+          result = await this.secretManager.getConfigSummary();
+          break;
+        case "ai:setActive":
+          await this.secretManager.setActiveProvider(msg.params.provider);
+          result = await this.secretManager.getConfigSummary();
+          break;
+        case "ai:validateKey": {
+          const key = msg.params.apiKey || (await this.secretManager.getRawKey(msg.params.provider));
+          if (!key) {
+            result = {
+              provider: msg.params.provider,
+              ok: false,
+              message: "No API key configured for provider",
+            };
+          } else {
+            const probeResult = await probeAiProviderKey(msg.params.provider, key);
+            await this.secretManager.recordTestResult(
+              msg.params.provider,
+              probeResult.ok,
+              probeResult.ok ? undefined : probeResult.message,
+            );
+            result = probeResult;
+          }
+          break;
+        }
       }
       this.post({ type: "response", id: msg.id, ok: true, result });
     } catch (err) {

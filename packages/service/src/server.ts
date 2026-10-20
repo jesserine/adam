@@ -3,7 +3,20 @@ import * as fs from "node:fs";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "node:path";
-import { indexRepository, readNodeContent, readSymbolCode, type CodeGraph, type IndexOptions } from "@adam/core";
+import {
+  indexRepository,
+  probeAiProviderKey,
+  readNodeContent,
+  readSymbolCode,
+  type AiProvider,
+  type AiValidationResult,
+  type CodeGraph,
+  type DeleteAiConfigRequest,
+  type IndexOptions,
+  type SaveAiConfigRequest,
+  type ValidateAiKeyRequest,
+} from "@adam/core";
+import { AiConfigStore } from "./ai-store";
 
 export interface ServiceOptions extends IndexOptions {
   /** Shared secret every API call must present. Generated when omitted. */
@@ -43,6 +56,7 @@ class HttpError extends Error {
  */
 export class AdamService {
   readonly token: string;
+  readonly aiStore: AiConfigStore;
   private graph: CodeGraph | undefined;
   private indexing: Promise<CodeGraph> | undefined;
   private pending = false;
@@ -54,6 +68,8 @@ export class AdamService {
 
   constructor(private readonly options: ServiceOptions) {
     this.token = options.token ?? randomBytes(24).toString("base64url");
+    const configDir = typeof options.cacheDir === "string" ? options.cacheDir : path.join(this.root, ".adam");
+    this.aiStore = new AiConfigStore(path.join(configDir, "ai-config.json"));
   }
 
   get root(): string {
@@ -175,6 +191,42 @@ export class AdamService {
       }
       case "GET /api/events":
         return this.openEvents(res);
+      case "GET /api/ai/config":
+        return sendJson(res, 200, await this.aiStore.getConfigSummary());
+      case "POST /api/ai/config": {
+        const body = await readJsonBody<SaveAiConfigRequest>(req);
+        if (!body.provider) throw new HttpError(400, "Missing provider");
+        const summary = await this.aiStore.saveKey(body);
+        return sendJson(res, 200, summary);
+      }
+      case "DELETE /api/ai/config": {
+        const body = await readJsonBody<DeleteAiConfigRequest>(req);
+        if (!body.provider) throw new HttpError(400, "Missing provider");
+        const summary = await this.aiStore.deleteKey(body.provider);
+        return sendJson(res, 200, summary);
+      }
+      case "POST /api/ai/active": {
+        const body = await readJsonBody<{ provider: AiProvider }>(req);
+        if (!body.provider) throw new HttpError(400, "Missing provider");
+        const summary = await this.aiStore.setActiveProvider(body.provider);
+        return sendJson(res, 200, summary);
+      }
+      case "POST /api/ai/validate": {
+        const body = await readJsonBody<ValidateAiKeyRequest>(req);
+        if (!body.provider) throw new HttpError(400, "Missing provider");
+        const key = body.apiKey || (await this.aiStore.getRawKey(body.provider));
+        if (!key) {
+          const result: AiValidationResult = {
+            provider: body.provider,
+            ok: false,
+            message: "No API key configured for provider",
+          };
+          return sendJson(res, 200, result);
+        }
+        const result = await probeAiProviderKey(body.provider, key);
+        await this.aiStore.recordTestResult(body.provider, result.ok, result.ok ? undefined : result.message);
+        return sendJson(res, 200, result);
+      }
       default:
         throw new HttpError(404, "Not found");
     }
@@ -226,4 +278,30 @@ export class AdamService {
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   res.end(JSON.stringify(body));
+}
+
+function readJsonBody<T>(req: http.IncomingMessage): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let raw = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk: string) => {
+      raw += chunk;
+      if (raw.length > 1024 * 1024) {
+        req.destroy();
+        reject(new HttpError(413, "Request body too large"));
+      }
+    });
+    req.on("end", () => {
+      if (!raw.trim()) {
+        resolve({} as T);
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw) as T);
+      } catch {
+        reject(new HttpError(400, "Invalid JSON body"));
+      }
+    });
+    req.on("error", reject);
+  });
 }

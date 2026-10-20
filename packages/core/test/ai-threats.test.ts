@@ -206,7 +206,8 @@ describe("ai-threats", () => {
         model: "gemini-3.8-flash",
       });
 
-      expect(capturedUrl).toContain("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=AQ.fakeGeminiKey12345");
+      expect(capturedUrl).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent");
+      expect((globalThis.fetch as any).mock.calls[0][1].headers["x-goog-api-key"]).toBe("AQ.fakeGeminiKey12345");
       expect(capturedBody.tools[0].functionDeclarations[0].name).toBe("report_security_threats");
       expect(capturedBody.toolConfig.functionCallingConfig.mode).toBe("ANY");
       expect(capturedBody.toolConfig.functionCallingConfig.allowedFunctionNames).toEqual(["report_security_threats"]);

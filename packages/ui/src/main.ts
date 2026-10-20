@@ -20,6 +20,7 @@ const state = {
   adj: undefined as ReturnType<typeof adjacency> | undefined,
   focus: undefined as string | undefined,
   viewing: undefined as string | undefined,
+  trail: [] as string[],
   /** The node or folder whose panel is open. */
   selected: undefined as string | undefined,
   view: "network" as "network" | "folders",
@@ -124,30 +125,47 @@ function onNetworkChange(next: NetworkState): void {
   const changed = next.inspected !== state.selected || next.focus !== state.focus;
   state.focus = next.focus;
   state.viewing = next.viewing;
+  state.trail = next.trail;
   state.selected = next.inspected;
   renderFocusBar();
   if (changed) renderPanel();
   markTreeSelection();
 }
 
+/**
+ * The bar over the network: the breadcrumb of folders opened so far (each one clickable to go
+ * back there), then what is focused or being viewed.
+ */
 function renderFocusBar(): void {
-  focusBar.hidden = !(state.focus || state.viewing) || state.view !== "network";
-  if (!state.focus) {
-    if (state.viewing) {
-      focusBar.replaceChildren(
-        h("span", {}, "Viewing ", h("strong", {}, state.viewing)),
-        h("span", { class: "hint" }, "Anything it does not connect to is dimmed."),
-        h("button", { class: "ghost", onclick: () => network.back(), title: "Stop viewing (Esc)" }, "Show all"),
-      );
-    }
+  focusBar.hidden = !(state.focus || state.viewing || state.trail.length) || state.view !== "network";
+  const crumbs = state.trail.length
+    ? [
+        h("nav", { class: "trail", "aria-label": "Folders opened" },
+          h("button", { class: "crumb", onclick: () => network.goTo(-1), title: "Back to the overview" }, "All"),
+          ...state.trail.flatMap((label, i) => [
+            h("span", { class: "sep" }, "›"),
+            i === state.trail.length - 1
+              ? h("strong", { class: "crumb current" }, label)
+              : h("button", { class: "crumb", onclick: () => network.goTo(i), title: `Back to ${label}` }, label),
+          ]),
+        ),
+      ]
+    : [];
+  if (state.focus) {
+    focusBar.replaceChildren(
+      ...crumbs,
+      h("span", {}, "Focused on ", h("strong", {}, network.labelOf(state.focus))),
+      h("span", { class: "hint" }, h("i", { class: "arrow-out" }), "imports"),
+      h("span", { class: "hint" }, h("i", { class: "arrow-in" }), "imported by"),
+      h("span", { class: "hint" }, "Clicking a node opens its panel and keeps these links."),
+      h("button", { class: "ghost", onclick: () => network.clearFocus(), title: "Clear focus (Esc)" }, "Clear focus"),
+    );
     return;
   }
   focusBar.replaceChildren(
-    h("span", {}, "Focused on ", h("strong", {}, network.labelOf(state.focus))),
-    h("span", { class: "hint" }, h("i", { class: "arrow-out" }), "imports"),
-    h("span", { class: "hint" }, h("i", { class: "arrow-in" }), "imported by"),
-    h("span", { class: "hint" }, "Clicking a node opens its panel and keeps these links."),
-    h("button", { class: "ghost", onclick: () => network.clearFocus(), title: "Clear focus (Esc)" }, "Clear focus"),
+    ...crumbs,
+    ...(state.viewing ? [h("span", { class: "hint" }, "Anything the open folder does not connect to is dimmed.")] : []),
+    h("button", { class: "ghost", onclick: () => network.back(), title: "Fold the last folder back (Esc)" }, "Back"),
   );
 }
 

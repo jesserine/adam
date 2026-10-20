@@ -55,23 +55,30 @@ Roslyn's references is the next benchmark to add.
 
 ## Network view
 
-- The view is styled after Graphify's graph page. One ForceAtlas2 layout (LinLog mode) runs over
-  every file, then noverlap spreads out any nodes that overlap. Each colour group has an
-  invisible anchor that its files are tied to, so a group stays in one place and files with no
-  imports sit with their group. The layout is computed once and never moves. A collapsed folder
-  becomes one node at the middle of its files, and edges between nodes are summed file imports.
-  Opening or closing a folder rebuilds the screen graph without moving anything, and the camera
-  keeps a fixed frame.
+- The view is styled after Graphify's graph page. The layout (`layout.ts`) is nested: each
+  colour group gets its own round area, and inside it each subfolder gets its own area, down to
+  the files. At every level d3's `packSiblings` packs the entries (subfolders first, then files
+  in the order a quick ForceAtlas2 run puts them, so files that import each other sit together)
+  with a gap left for labels. The groups are then placed by ForceAtlas2 over the imports between
+  them, and noverlap keeps a wide margin between groups. The layout is seeded from file names,
+  computed once and never moves. A collapsed folder becomes one node at the centre of its area,
+  and edges between nodes are summed file imports. Opening or closing a folder rebuilds the
+  screen graph without moving anything.
 - Colour groups (`colorGroups` in `model.ts`) start from the clusters. The biggest group keeps
   opening into its subfolders while the groups still fit the 10 colours. A group holding more
   than a quarter of the files opens past that limit (the extra groups are grey). Repos with more
   than 150 files open with each colour group collapsed to one node.
 - A node's size grows with its links. Only hubs and folders are labelled; other labels show on
   hover or when the node is lit. Edges are faint curves in their source's colour. The sidebar
-  holds search, the inspected node, and the groups with show/hide checkboxes.
+  holds search, the inspected node, and the groups with show/hide checkboxes. Labels are
+  placed after each frame, most important first, and skip any spot that would cover another
+  label or node. An unticked group is always hidden, even inside an open or focused folder.
 - Opening a folder frames its files and puts the view in "viewing" mode: the folder's files and
-  anything they import or are imported by stay bright, the rest fades. Esc (or clicking the
-  empty canvas) steps back: first the focus, then the viewing mode.
+  anything they import or are imported by stay bright, the rest fades. Each open is pushed onto
+  a trail shown as a breadcrumb (`All › routes/_app/ › _app/products/`); a crumb, Back or Esc
+  returns to that step with the folders that were open then. Esc clears the focus first.
+  Clicking the empty canvas only clears the focus, and folders that a focus opened just to show
+  a file fold back with it.
 - Folders fold along each file's path, starting from its cluster (`apps/web`, `packages/db`).
   Pass-through folders (a parent's only entry, such as `apps/web/src`) and one-file folders are
   skipped, so every expand shows something new.

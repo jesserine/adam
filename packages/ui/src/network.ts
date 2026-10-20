@@ -2,9 +2,8 @@ import type { CodeGraph } from "@adam/core";
 import EdgeCurveProgram, { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
 import { createNodeBorderProgram } from "@sigma/node-border";
 import Graph from "graphology";
-import forceAtlas2 from "graphology-layout-forceatlas2";
-import noverlap from "graphology-layout-noverlap";
 import Sigma from "sigma";
+import { layoutByGroup } from "./layout";
 import type { NodeHoverDrawingFunction, NodeLabelDrawingFunction } from "sigma/rendering";
 import {
   adjacency,
@@ -16,6 +15,7 @@ import {
   fileLabels,
   Folding,
   groupFolder,
+  groupId,
   isGroupId,
   isToolFolder,
   sharedPrefix,
@@ -39,6 +39,14 @@ export interface NetworkState {
   focus: string | undefined;
   viewing: string | undefined;
   inspected: string | undefined;
+  /** The folders opened one after another, oldest first, so the user can see where they came from. */
+  trail: string[];
+}
+
+/** What going back restores: which folders were open, and which one was being viewed. */
+interface Snapshot {
+  expanded: Set<string>;
+  viewing: { folder: string; files: Set<string> } | undefined;
 }
 
 /** A unit's links to other units, counted in file-level imports. */
@@ -89,6 +97,10 @@ export class NetworkView {
   /** Positions from one layout of every file, so opening a folder never moves anything else. */
   private positions = new Map<string, { x: number; y: number }>();
   private groups: ColorGroups = { groupOf: new Map(), counts: new Map() };
+  /** Where each colour group's disc sits, from layout(). */
+  private groupCenters = new Map<string, { x: number; y: number; r: number }>();
+  /** Where each folder's area is centred, so a collapsed folder sits there and never on a neighbour. */
+  private folderCenters = new Map<string, { x: number; y: number }>();
   private hiddenGroups = new Set<string>();
   private maxDegree = 1;
   /** Files with at least this many links are hubs and always named. */
@@ -104,8 +116,12 @@ export class NetworkView {
   private focusLabel: string | undefined;
   private viewing: { folder: string; files: Set<string> } | undefined;
   private inspected: string | undefined;
+  /** Each folder opened, with what was open before it, so back and the breadcrumb can return there. */
+  private trail: Array<{ folder: string; before: Snapshot }> = [];
+  /** What was open before focusing opened folders to reveal a node; clearing the focus folds them back. */
+  private focusBefore: Snapshot | undefined;
   private hovered: string | undefined;
-  private labelQueue: Array<{ text: string; x: number; y: number; rank: number; size: number }> = [];
+  private labelQueue: Array<{ text: string; x: number; y: number; rank: number; size: number; color?: string; center?: boolean }> = [];
   private lit: Lit | undefined;
   /** A click on a folder waits out the double-click window, so a double-click only opens the folder. */
   private pendingClick: ReturnType<typeof setTimeout> | undefined;
@@ -187,9 +203,13 @@ export class NetworkView {
       clearTimeout(this.pendingClick);
       if (isGroupId(node)) this.toggle(node);
     });
-    this.sigma.on("clickStage", () => this.back());
+    // A click on empty space only clears the focus; folding folders back is for Esc, Back and the breadcrumb.
+    this.sigma.on("clickStage", () => this.clearFocus());
     this.sigma.on("beforeRender", () => (this.labelQueue = []));
-    this.sigma.on("afterRender", () => this.drawLabels());
+    this.sigma.on("afterRender", () => {
+      this.queueGroupNames();
+      this.drawLabels();
+    });
     this.sigma.on("enterNode", ({ node }) => {
       container.style.cursor = "pointer";
       this.hovered = node;
@@ -234,11 +254,16 @@ export class NetworkView {
 
   /** Click semantics: with nothing focused, focus the unit; while focused, only open its panel. */
   activate(id: string): void {
+    const before = this.snapshot();
     const unit = this.show(id);
     if (!unit) return;
+    const opened = this.expanded.size !== before.expanded.size;
     if (!this.focusFiles) {
       this.focusFiles = new Set(this.filesOf(unit));
       this.focusLabel = this.labelOf(unit);
+      this.focusBefore = opened ? before : undefined;
+    } else if (opened && !this.focusBefore) {
+      this.focusBefore = before;
     }
     this.inspected = unit;
     this.relight();
@@ -254,26 +279,60 @@ export class NetworkView {
     if (pos) void this.sigma.getCamera().animate({ x: pos.x, y: pos.y, ratio: 0.4 }, { duration: 400 });
   }
 
+  /** Clears the focus, and folds back any folders that were opened only to show a focused node. */
   clearFocus(): void {
     if (!this.focusFiles && !this.inspected) return;
     this.focusFiles = this.focusLabel = this.inspected = undefined;
-    this.relight();
-    this.emit();
+    const before = this.focusBefore;
+    this.focusBefore = undefined;
+    if (!before) {
+      this.relight();
+      this.emit();
+      return;
+    }
+    this.expanded = new Set(before.expanded);
+    this.rebuild();
   }
 
-  /** One step back, like Esc or a click on empty space: first the focus, then the folder being viewed. */
+  /**
+   * One step back, like Esc or the Back button: first the focus, then the last folder opened,
+   * which folds it back and returns the camera to where it was.
+   */
   back(): void {
     if (this.focusFiles || this.inspected) return this.clearFocus();
+    const step = this.trail.pop();
+    if (step) return this.restore(step.before);
     if (!this.viewing) return;
     this.viewing = undefined;
     this.relight();
     this.emit();
   }
 
+  /** Returns to a breadcrumb: -1 is the overview, otherwise the index of a folder in the trail. */
+  goTo(index: number): void {
+    if (index >= this.trail.length - 1) return;
+    const next = this.trail[index + 1];
+    this.trail.length = index + 1;
+    this.restore(next.before);
+  }
+
+  private snapshot(): Snapshot {
+    return { expanded: new Set(this.expanded), viewing: this.viewing };
+  }
+
+  private restore(s: Snapshot): void {
+    this.expanded = new Set(s.expanded);
+    this.viewing = s.viewing;
+    this.rebuild();
+    if (this.viewing) this.frameFiles(this.viewing.files);
+    else this.fit();
+  }
+
   /** Opens a collapsed folder and views it, or closes the folder a node sits in. */
   toggle(unit: string): void {
     if (isGroupId(unit)) {
       const folder = groupFolder(unit);
+      this.trail.push({ folder, before: this.snapshot() });
       this.expanded.add(folder);
       this.viewing = { folder, files: new Set(this.folding.membersOf(folder)) };
       this.rebuild();
@@ -282,7 +341,9 @@ export class NetworkView {
     }
     const parent = this.folding.parentOf(unit);
     if (parent === undefined) return;
-    for (const f of [...this.expanded]) if (f === parent || f.startsWith(`${parent}/`)) this.expanded.delete(f);
+    const inside = (f: string) => f === parent || f.startsWith(`${parent}/`);
+    for (const f of [...this.expanded]) if (inside(f)) this.expanded.delete(f);
+    this.trail = this.trail.filter((t) => !inside(t.folder));
     if (this.viewing && (this.viewing.folder === parent || this.viewing.folder.startsWith(`${parent}/`))) this.viewing = undefined;
     this.rebuild();
   }
@@ -294,14 +355,16 @@ export class NetworkView {
 
   expandAll(): void {
     this.expanded = new Set(this.folding.folders());
-    this.viewing = undefined;
+    this.viewing = this.focusBefore = undefined;
+    this.trail = [];
     this.rebuild();
     this.fit();
   }
 
   collapseAll(): void {
     this.expanded.clear();
-    this.viewing = undefined;
+    this.viewing = this.focusBefore = undefined;
+    this.trail = [];
     this.rebuild();
     this.fit();
   }
@@ -360,7 +423,10 @@ export class NetworkView {
       const q = toFramed(p);
       [minX, maxX, minY, maxY] = [Math.min(minX, q.x), Math.max(maxX, q.x), Math.min(minY, q.y), Math.max(maxY, q.y)];
     }
-    if (Number.isFinite(minX)) this.frame(minX, maxX, minY, maxY, true);
+    if (!Number.isFinite(minX)) return;
+    // Leave room around the folder so the way back to its neighbours stays in sight.
+    const pad = Math.max(maxX - minX, maxY - minY, 0.08) * 0.5;
+    this.frame(minX - pad, maxX + pad, minY - pad, maxY + pad, true);
   }
 
   private frame(minX: number, maxX: number, minY: number, maxY: number, animate: boolean): void {
@@ -426,59 +492,26 @@ export class NetworkView {
 
   // Building the view --------------------------------------------------------------------------
 
-  /**
-   * One force layout of every file, like Graphify's: ForceAtlas2 in LinLog mode pulls tightly
-   * coupled files into clumps. Each colour group also gets an invisible anchor its files are tied
-   * to, so a group stays in one place and files with no imports sit with their group instead of
-   * drifting to the edge. Finally noverlap nudges nodes apart so none hide another.
-   */
+  /** Lays files out group by group (see layoutByGroup), and fixes the camera's frame to it. */
   private layout(): void {
-    const g = new Graph({ multi: false, type: "undirected" });
-    const groups = [...this.groups.counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    const anchor = (group: string) => `\u0000anchor:${group}`;
-    groups.forEach(([group], i) => {
-      // Groups start on a sunflower spiral, biggest in the middle.
-      const r = 60 * Math.sqrt(i);
-      g.addNode(anchor(group), { x: r * Math.cos(i * 2.39996), y: r * Math.sin(i * 2.39996) });
+    const placed = layoutByGroup({
+      files: this.data.nodes.map((n) => n.id),
+      outgoing: (f) => (this.adj.outgoing.get(f) ?? []).map((e) => e.target),
+      groupOf: this.groups.groupOf,
+      pathTo: (f) => this.folding.pathTo(f),
+      size: (f) => this.fileSize(f),
     });
-    for (const n of this.data.nodes) {
-      const a = g.getNodeAttributes(anchor(this.groups.groupOf.get(n.id)!));
-      const h = hash(n.id);
-      g.addNode(n.id, this.positions.get(n.id) ?? { x: (a.x as number) + (h % 41) - 20, y: (a.y as number) + ((h >> 8) % 41) - 20 });
-      g.addEdge(n.id, anchor(this.groups.groupOf.get(n.id)!), { weight: 0.4 });
-    }
-    for (const e of this.data.edges) {
-      if (e.source === e.target || g.hasEdge(e.source, e.target)) continue;
-      const same = this.groups.groupOf.get(e.source) === this.groups.groupOf.get(e.target);
-      g.addEdge(e.source, e.target, { weight: same ? 2 : 1 });
-    }
-
-    const fresh = this.data.nodes.filter((n) => !this.positions.has(n.id)).length;
-    const n = g.order;
-    if (n > 1 && fresh > 0) {
-      forceAtlas2.assign(g, {
-        iterations: this.positions.size ? 60 : n < 500 ? 400 : n < 3000 ? 200 : 80,
-        getEdgeWeight: "weight",
-        settings: { ...forceAtlas2.inferSettings(g), linLogMode: true, edgeWeightInfluence: 1, barnesHutOptimize: n > 1000 },
-      });
-      // noverlap works in layout units, so node sizes are scaled from pixels to a ~900px frame.
-      let extent = 1;
-      g.forEachNode((_, a) => (extent = Math.max(extent, Math.abs(a.x as number), Math.abs(a.y as number))));
-      const scale = (2 * extent) / 900;
-      g.forEachNode((id) => g.setNodeAttribute(id, "size", id.startsWith("\u0000") ? 0 : (this.fileSize(id) + 1.5) * scale));
-      noverlap.assign(g, { maxIterations: 60, settings: { margin: 1.5 * scale, ratio: 1, expansion: 1.05 } });
-    }
-
+    this.groupCenters = placed.groups;
+    this.folderCenters = placed.folders;
     this.positions = new Map();
     let [minX, maxX, minY, maxY] = [Infinity, -Infinity, Infinity, -Infinity];
     for (const node of this.data.nodes) {
-      const a = g.getNodeAttributes(node.id);
-      const p = { x: a.x as number, y: a.y as number };
+      const p = placed.positions.get(node.id)!;
       this.positions.set(node.id, p);
       [minX, maxX, minY, maxY] = [Math.min(minX, p.x), Math.max(maxX, p.x), Math.min(minY, p.y), Math.max(maxY, p.y)];
     }
     // Fixed framing: opening or closing a folder must not rescale the whole picture.
-    if (this.positions.size) this.sigma.setCustomBBox({ x: [minX, maxX], y: [minY, maxY] });
+    if (this.positions.size) this.sigma.setCustomBBox({ x: [minX - 40, maxX + 40], y: [minY - 40, maxY + 40] });
   }
 
   private degree(id: string): number {
@@ -524,7 +557,8 @@ export class NetworkView {
         });
         continue;
       }
-      // A folder sits at the middle of its files and takes the colour most of them have.
+      // A folder sits at the centre of its area (or of its files, above the colour groups) and
+      // takes the colour most of its files have.
       let [x, y] = [0, 0];
       const tally = new Map<string, number>();
       for (const f of files) {
@@ -533,6 +567,8 @@ export class NetworkView {
         y += p.y / files.length;
         bump(tally, this.groups.groupOf.get(f)!);
       }
+      const centre = this.folderCenters.get(groupFolder(unit));
+      if (centre) [x, y] = [centre.x, centre.y];
       const group = [...tally.entries()].sort((a, b) => b[1] - a[1])[0][0];
       const tool = isToolFolder(group);
       const color = this.colorFor(group, false);
@@ -568,7 +604,7 @@ export class NetworkView {
       this.graph.mergeEdgeAttributes(s, t, {
         count,
         typeOnly: (this.graph.getEdgeAttribute(s, t, "typeOnly") as boolean) && e.typeOnly,
-        size: 0.6 + Math.min(3, Math.log2(count) * 0.5),
+        size: 0.6 + Math.min(2, Math.log2(count) * 0.4),
       });
     }
 
@@ -634,17 +670,50 @@ export class NetworkView {
   }
 
   private emit(): void {
-    this.onChange({ focus: this.focusLabel, viewing: this.viewing && `${this.viewing.folder}/`, inspected: this.inspected });
+    this.onChange({
+      focus: this.focusLabel,
+      viewing: this.viewing && `${this.viewing.folder}/`,
+      inspected: this.inspected,
+      trail: this.trail.map((t) => `${this.groupName(t.folder, clusterOf({ folder: t.folder })).split("/").slice(-2).join("/")}/`),
+    });
   }
 
+  /** A node is hidden when its group is unticked (whatever is open or focused), or by the unconnected filter. */
   private isHidden(node: string): boolean {
-    if (node === this.inspected || this.lit?.units.has(node)) return false;
     const group = this.graph.getNodeAttribute(node, "group") as string;
     if (this.hiddenGroups.has(this.slots.has(group) ? group : OTHER_KEY)) return true;
+    if (node === this.inspected || this.lit?.units.has(node)) return false;
     return this.filters.hideUnconnected && !this.graph.getNodeAttribute(node, "connected");
   }
 
   // Drawing -----------------------------------------------------------------------------------
+
+  /**
+   * Names each open colour group above its area, in the group's colour, so the map reads as
+   * labelled neighbourhoods. A collapsed group is already named by its node, and a group the
+   * current view dims or the legend hides is left unnamed.
+   */
+  private queueGroupNames(): void {
+    const size = this.sigma.getSetting("labelSize");
+    for (const [group, c] of this.groupCenters) {
+      if (this.graph.hasNode(groupId(group)) || this.hiddenGroups.has(this.slots.has(group) ? group : OTHER_KEY)) continue;
+      const viewed = this.viewing?.folder;
+      if (this.lit?.mode === "view" && viewed && !viewed.startsWith(group) && !group.startsWith(viewed)) continue;
+      const top = this.sigma.graphToViewport({ x: c.x, y: c.y + c.r });
+      const mid = this.sigma.graphToViewport({ x: c.x, y: c.y });
+      if (Math.abs(mid.y - top.y) < 40) continue;
+      const tool = isToolFolder(group);
+      this.labelQueue.push({
+        text: this.groupLabel(group),
+        x: top.x,
+        y: Math.min(top.y, mid.y - Math.abs(mid.y - top.y)) - size,
+        rank: tool ? 0 : 2.5,
+        size: 0,
+        color: tool ? this.inColor() : this.colorFor(group, false),
+        center: true,
+      });
+    }
+  }
 
   /**
    * Sigma asks for labels in no useful order, and folder labels are always asked for, so long
@@ -675,19 +744,39 @@ export class NetworkView {
     ctx.lineWidth = 3;
     const placed: Array<[number, number, number, number]> = [];
     const free = (b: number[]) => !placed.some((p) => b[0] < p[2] && b[2] > p[0] && b[1] < p[3] && b[3] > p[1]);
+    const nodes = this.nodeDiscs();
+    const clear = (b: number[], own: { x: number; y: number }) =>
+      !nodes.some((n) => (Math.abs(n.x - own.x) > 1 || Math.abs(n.y - own.y) > 1) && n.x + n.r > b[0] && n.x - n.r < b[2] && n.y + n.r > b[1] && n.y - n.r < b[3]);
     for (const l of queue) {
       const w = ctx.measureText(l.text).width;
-      // Right of the node first; if that is taken, try its left.
-      const spots = [l.x, l.x - 2 * l.size - 8 - w];
+      // Right of the node first; if that is taken, try its left. A label also keeps off other
+      // nodes; only folder and focus labels may cross one when there is no other room.
+      const spots = l.center ? [l.x - w / 2] : [l.x, l.x - 2 * l.size - 8 - w];
       const box = (at: number) => [at - 6, l.y - size / 2 - 3, at + w + 6, l.y + size / 2 + 3] as [number, number, number, number];
-      const x = spots.find((at) => free(box(at)));
+      const own = { x: l.x - l.size - 4, y: l.y };
+      const x = spots.find((at) => free(box(at)) && clear(box(at), own)) ?? (l.rank >= 2 ? spots.find((at) => free(box(at))) : undefined);
       if (x === undefined) continue;
       placed.push(box(x));
       ctx.strokeStyle = this.background();
       ctx.strokeText(l.text, x, l.y + size / 3);
-      ctx.fillStyle = this.ink();
+      ctx.fillStyle = l.color ?? this.ink();
       ctx.fillText(l.text, x, l.y + size / 3);
     }
+  }
+
+  /** Every node on screen as a disc in viewport pixels, so labels can keep off them. */
+  private nodeDiscs(): Array<{ x: number; y: number; r: number }> {
+    const { width, height } = this.sigma.getDimensions();
+    const out: Array<{ x: number; y: number; r: number }> = [];
+    this.graph.forEachNode((id) => {
+      const d = this.sigma.getNodeDisplayData(id);
+      if (!d || d.hidden) return;
+      const p = this.sigma.framedGraphToViewport(d);
+      const r = this.sigma.scaleSize(d.size) + 2;
+      if (p.x + r < 0 || p.y + r < 0 || p.x - r > width || p.y - r > height) return;
+      out.push({ x: p.x, y: p.y, r });
+    });
+    return out;
   }
 
   /** Hovered and highlighted nodes: a ring and a label chip in the theme's colours (Sigma's default is white on white in dark themes). */
@@ -755,11 +844,4 @@ export class NetworkView {
 
 function bump(map: Map<string, number>, key: string): void {
   map.set(key, (map.get(key) ?? 0) + 1);
-}
-
-/** A small stable hash, so a file's starting spot is the same on every load. */
-function hash(text: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
-  return h >>> 0;
 }

@@ -176,6 +176,34 @@ button {
   background: var(--muted);
 }
 
+.trail {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  margin-right: 6px;
+}
+
+.trail .crumb {
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--link);
+}
+
+.trail button.crumb:hover {
+  background: var(--border);
+}
+
+.trail .crumb.current {
+  color: var(--fg);
+}
+
+.trail .sep {
+  color: var(--muted);
+}
+
 .focus-bar button {
   padding: 2px 8px;
 }

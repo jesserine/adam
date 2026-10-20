@@ -68,12 +68,16 @@ Open any project folder and run **Adam: Open Network View**. To remove it later,
   **Expand folder** in its panel, to open it into its subfolders and files. **Collapse folder** on
   any node inside folds it back. **Expand all** and **Collapse all** are in the toolbar.
 - **Viewing a folder:** opening a folder zooms to its files and fades everything it does not
-  connect to, and a bar says "Viewing …". **Show all** or Esc goes back.
+  connect to. The bar at the top shows the path you took (`All › routes/_app/ › _app/products/`):
+  click a crumb, **Back** or Esc to return to that step. Unticking a group hides its nodes even
+  while you are inside one of its folders.
+- **Spacing:** every group sits in its own area with its name above it, every subfolder in its
+  own clump inside, and labels never cover another node.
 - **Hover a node:** its links light up and the rest fades, until the pointer leaves.
 - **Click a node (focus):** its links stay lit and a bar at the top says what is focused. Bright
   arrows are imports, grey ones are imported-by. While focused, clicking any other node only
   opens its panel (its link to the focus is drawn thicker); the lit links do not change. Click the
-  empty canvas, press Esc or **Clear focus** to unfocus.
+  empty canvas, press Esc or **Clear focus** to unfocus; folders the focus opened fold back.
 - **Panel:** for a file, language, size, imports, imported-by, packages and env variables it
   reads. For a folder, its size, the folders it imports from and is imported by (with counts),
   and its files.

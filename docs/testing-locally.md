@@ -58,10 +58,20 @@ Open any project folder and run **Adam: Open Network View**. To remove it later,
 
 ## What to check
 
-- **Network:** every file is a dot, imports are arrows, colours are module folders (legend at the
-  bottom left). Scroll to zoom, drag to pan, **Fit** to reset.
-- **Click a node:** the panel shows language, size, imports, imported-by, packages and env
-  variables it reads.
+- **Network:** every file is a dot, imports are lines, colours are module folders (legend at the
+  bottom left). Scroll to zoom, drag to pan, **Fit** to frame what is on screen.
+- **Clusters:** a repo with more than 150 files opens collapsed, one ringed node per package or
+  module folder (`apps/web · 180`), with lines summed between them. Double-click a cluster, or
+  **Expand folder** in its panel, to open it into its subfolders and files; **Collapse folder** on
+  any node inside folds it back. **Expand all** and **Collapse all** are in the toolbar.
+- **Hover a node:** its links light up and the rest fades, until the pointer leaves.
+- **Click a node (focus):** its links stay lit and a bar at the top says what is focused. Bright
+  arrows are imports, grey ones are imported-by. While focused, clicking any other node only
+  opens its panel (its link to the focus is drawn thicker); the lit links do not change. Click the
+  empty canvas, press Esc or **Clear focus** to unfocus.
+- **Panel:** for a file, language, size, imports, imported-by, packages and env variables it
+  reads. For a folder, its size, the folders it imports from and is imported by (with counts),
+  and its files.
 - **Symbols:** functions, classes, methods and types are listed collapsed. Open one to see only
   its code; **Open at line** jumps to it in the editor.
 - **Manual editing:** **Open in editor** opens the file beside the network. Save a change (for

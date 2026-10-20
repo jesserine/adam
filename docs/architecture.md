@@ -25,6 +25,18 @@ packages/
 4. The webview asks the extension for data over `postMessage`; the extension forwards to the
    service. In a browser the UI calls the service directly with the token from the URL fragment.
 
+## Network view
+
+- One ForceAtlas2 layout runs over every file. What is on screen is built from it: a folder that
+  is collapsed becomes one node at the middle of its files, and edges between nodes are summed
+  file imports. Opening or closing a folder rebuilds the screen graph without moving the layout,
+  and the camera keeps a fixed frame, so nothing else jumps.
+- Folders fold along each file's path, starting from its cluster (`apps/web`, `packages/db`).
+  Pass-through folders (a parent's only entry, such as `apps/web/src`) and one-file folders are
+  skipped, so every expand shows something new.
+- Focus is a set of files, not a screen node, so it survives folders opening and closing: the lit
+  links are always the focused files' imports, drawn between whatever nodes now hold them.
+
 ## Secrets
 
 - Sensitive nodes (`.env*`, keys, certificates, credentials, cloud service accounts, registry
@@ -46,4 +58,3 @@ The same masking path will sit in front of the agent, so a model never sees a se
 - Onboarding report with the access checklist (env vars from `envDeclares` and `envReads`).
 - Built-in encrypted secrets vault.
 - Summary cache and project memory in `.adam/`.
-- Clustering and focus mode for very large graphs.

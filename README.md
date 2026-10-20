@@ -5,7 +5,7 @@ node, every import is an edge, and clicking a node opens a panel with its functi
 you need them. Later phases add an agent that proposes changes with its reasoning (never writing
 without your accept), an onboarding report, an API explorer and security overlays.
 
-![Excalidraw's 1,318 files as a network](docs/images/network-excalidraw.png)
+![Excalidraw's 1,318 files as a network, opened as one node per package](docs/images/network-excalidraw.png)
 
 This repository holds the MVP: a **VS Code extension** backed by a separate **local service**, so
 the same core can later ship as a standalone desktop app.
@@ -17,6 +17,8 @@ Phase 0 slice, working end to end:
 - Index a TypeScript or JavaScript repo: every file is a node; imports, re-exports, `import()` and
   `require` are edges, resolved through `tsconfig`/`jsconfig` paths and across monorepo packages.
 - Network view (Sigma.js, WebGL) coloured by module, with search, filters and a folder view.
+  Big repos open as collapsible clusters, and a focused node keeps its links on screen while you
+  click around its neighbours.
 - Node panel with symbols collapsed by default; open one to read only its code, or jump to the
   editor to change it by hand.
 - Sensitive nodes masked (`.env` shows names, never values) and secret-looking values redacted.

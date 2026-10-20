@@ -1,9 +1,9 @@
 import type { CodeGraph } from "@adam/core";
 import { h } from "./dom";
 import { createHost } from "./host";
-import { adjacency, buildTree, type TreeEntry } from "./model";
-import { NetworkView, type Theme } from "./network";
-import { renderNodePanel } from "./panel";
+import { adjacency, buildTree, isGroupId, type TreeEntry } from "./model";
+import { NetworkView, type NetworkState, type Theme } from "./network";
+import { renderGroupPanel, renderNodePanel } from "./panel";
 import "./styles.css";
 
 const host = createHost();
@@ -18,6 +18,8 @@ function detectTheme(): Theme {
 const state = {
   graph: undefined as CodeGraph | undefined,
   adj: undefined as ReturnType<typeof adjacency> | undefined,
+  focus: undefined as string | undefined,
+  /** The node or folder whose panel is open. */
   selected: undefined as string | undefined,
   view: "network" as "network" | "folders",
 };
@@ -36,6 +38,7 @@ const networkEl = h("div", { class: "network" });
 const treeEl = h("div", { class: "tree", hidden: true });
 const panelEl = h("aside", { class: "panel", hidden: true });
 const statusEl = h("div", { class: "status", hidden: true });
+const focusBar = h("div", { class: "focus-bar", hidden: true });
 
 document.body.append(
   h(
@@ -51,14 +54,16 @@ document.body.append(
       h("label", { class: "filter" }, hideUnconnected, "Hide unconnected"),
       h("label", { class: "filter" }, hideTypeOnly, "Hide type-only imports"),
       h("button", { class: "ghost", onclick: () => void reindex(), title: "Re-index the repository" }, "Re-index"),
-      h("button", { class: "ghost", onclick: () => network.resetCamera(), title: "Fit the whole network" }, "Fit"),
+      h("button", { class: "ghost", onclick: () => network.expandAll(), title: "Show every file" }, "Expand all"),
+      h("button", { class: "ghost", onclick: () => network.collapseAll(), title: "Fold every folder back into its cluster" }, "Collapse all"),
+      h("button", { class: "ghost", onclick: () => network.fit(), title: "Fit what is on screen" }, "Fit"),
       stats,
     ),
-    h("main", { class: "main" }, h("div", { class: "canvas" }, networkEl, treeEl, legend, statusEl), panelEl),
+    h("main", { class: "main" }, h("div", { class: "canvas" }, networkEl, treeEl, focusBar, legend, statusEl), panelEl),
   ),
 );
 
-const network = new NetworkView(networkEl, detectTheme(), (id) => select(id));
+const network = new NetworkView(networkEl, detectTheme(), (s) => onNetworkChange(s));
 
 new MutationObserver(() => {
   network.setTheme(detectTheme());
@@ -72,6 +77,9 @@ hideTypeOnly.addEventListener("change", applyFilters);
 search.addEventListener("change", () => findNode(search.value));
 search.addEventListener("keydown", (e) => {
   if (e.key === "Enter") findNode(search.value);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !(e.target instanceof HTMLInputElement)) network.clearFocus();
 });
 
 // Behaviour ----------------------------------------------------------------------------------
@@ -88,15 +96,33 @@ function findNode(query: string): void {
     showStatus(`No node matches “${query}”.`);
     return;
   }
-  select(hit.id);
-  network.focus(hit.id);
+  network.focusOn(hit.id);
 }
 
-function select(id: string | undefined): void {
-  state.selected = id;
-  network.select(id);
-  renderPanel();
+/** Clicking a node, a link in the panel or a file in the tree all go through the network's focus rules. */
+function select(id: string): void {
+  network.activate(id);
+}
+
+function onNetworkChange(next: NetworkState): void {
+  const changed = next.inspected !== state.selected || next.focus !== state.focus;
+  state.focus = next.focus;
+  state.selected = next.inspected;
+  renderFocusBar();
+  if (changed) renderPanel();
   markTreeSelection();
+}
+
+function renderFocusBar(): void {
+  focusBar.hidden = !state.focus || state.view !== "network";
+  if (!state.focus) return;
+  focusBar.replaceChildren(
+    h("span", {}, "Focused on ", h("strong", {}, network.labelOf(state.focus))),
+    h("span", { class: "hint" }, h("i", { class: "arrow-out" }), "imports"),
+    h("span", { class: "hint" }, h("i", { class: "arrow-in" }), "imported by"),
+    h("span", { class: "hint" }, "Clicking a node opens its panel and keeps these links."),
+    h("button", { class: "ghost", onclick: () => network.clearFocus(), title: "Clear focus (Esc)" }, "Clear focus"),
+  );
 }
 
 function setView(view: "network" | "folders"): void {
@@ -107,21 +133,44 @@ function setView(view: "network" | "folders"): void {
   legend.hidden = view !== "network";
   treeEl.hidden = view !== "folders";
   if (view === "folders") renderTree();
+  renderFocusBar();
 }
 
 function renderPanel(): void {
-  const node = state.selected ? state.graph?.nodes.find((n) => n.id === state.selected) : undefined;
-  panelEl.hidden = !node;
-  if (!node || !state.adj) return;
-  renderNodePanel(panelEl, node, {
-    host,
-    incoming: state.adj.incoming.get(node.id) ?? [],
-    outgoing: state.adj.outgoing.get(node.id) ?? [],
-    onSelect: (target) => {
-      select(target);
-      network.focus(target);
-    },
-  });
+  const id = state.selected;
+  if (!id || !state.graph || !state.adj) {
+    panelEl.hidden = true;
+    return;
+  }
+  const collapse = network.canCollapse(id)
+    ? [h("button", { class: "ghost", onclick: () => network.toggle(id), title: "Fold this back into its folder" }, "Collapse folder")]
+    : [];
+  if (isGroupId(id)) {
+    const info = network.groupInfo(id);
+    const files = new Set(info.files);
+    renderGroupPanel(panelEl, {
+      folder: info.folder,
+      files: state.graph.nodes.filter((n) => files.has(n.id)),
+      ...network.links(id),
+      onExpand: () => network.toggle(id),
+      onSelect: select,
+      actions: collapse,
+    });
+  } else {
+    const node = state.graph.nodes.find((n) => n.id === id);
+    if (!node) {
+      panelEl.hidden = true;
+      return;
+    }
+    renderNodePanel(panelEl, node, {
+      host,
+      incoming: state.adj.incoming.get(node.id) ?? [],
+      outgoing: state.adj.outgoing.get(node.id) ?? [],
+      onSelect: select,
+      actions: collapse,
+    });
+  }
+  panelEl.hidden = false;
   panelEl.scrollTop = 0;
 }
 
@@ -176,8 +225,7 @@ async function load(): Promise<void> {
     stats.title = `Indexed in ${s.durationMs} ms (${s.reparsed} files re-read)`;
     renderLegend();
     if (state.view === "folders") renderTree();
-    if (state.selected && !graph.nodes.some((n) => n.id === state.selected)) select(undefined);
-    else renderPanel();
+    renderPanel();
     showStatus(graph.nodes.length ? undefined : "This folder has no files to index.");
   } catch (err) {
     showStatus(`Could not load the graph: ${(err as Error).message}`);

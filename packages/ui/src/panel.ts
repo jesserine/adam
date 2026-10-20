@@ -1,6 +1,7 @@
 import type { CodeSymbol, GraphEdge, GraphNode } from "@adam/core";
 import { formatBytes, h } from "./dom";
 import type { Host } from "./host";
+import type { UnitLink } from "./network";
 
 const KIND_LABEL: Record<CodeSymbol["kind"], string> = {
   function: "fn",
@@ -19,6 +20,8 @@ interface PanelContext {
   incoming: GraphEdge[];
   outgoing: GraphEdge[];
   onSelect: (id: string) => void;
+  /** Extra buttons for the panel header, such as collapsing the node into its folder. */
+  actions?: HTMLElement[];
 }
 
 /**
@@ -55,7 +58,7 @@ export function renderNodePanel(container: HTMLElement, node: GraphNode, ctx: Pa
         node.secretHints > 0 &&
           h("span", { class: "chip warn", title: "Secret-looking values in this file are masked" }, `${node.secretHints} secret${node.secretHints > 1 ? "s" : ""} masked`),
       ),
-      openButton,
+      h("div", { class: "panel-actions" }, openButton, ...(ctx.actions ?? [])),
     ),
   );
 
@@ -168,4 +171,76 @@ function tagList(items: string[], tone = ""): HTMLElement {
 
 function section(title: string, content: HTMLElement, hint?: string): HTMLElement {
   return h("section", { class: "panel-section" }, h("h3", {}, title), hint ? h("p", { class: "muted small" }, hint) : null, content);
+}
+
+interface GroupPanelContext {
+  folder: string;
+  files: GraphNode[];
+  outgoing: UnitLink[];
+  incoming: UnitLink[];
+  onExpand: () => void;
+  onSelect: (id: string) => void;
+  actions?: HTMLElement[];
+}
+
+/** The panel for a collapsed folder: its size, the folders it talks to, and its files. */
+export function renderGroupPanel(container: HTMLElement, ctx: GroupPanelContext): void {
+  const sensitive = ctx.files.filter((f) => f.sensitive).length;
+  const lines = ctx.files.reduce((sum, f) => sum + (f.binary ? 0 : f.lines), 0);
+  container.replaceChildren(
+    h(
+      "header",
+      { class: "panel-head" },
+      h("div", { class: "panel-title" }, `${ctx.folder.split("/").at(-1)}/`),
+      h("div", { class: "panel-path" }, `${ctx.folder}/`),
+      h(
+        "div",
+        { class: "chips" },
+        h("span", { class: "chip" }, "folder"),
+        h("span", { class: "chip" }, `${ctx.files.length} files`),
+        h("span", { class: "chip" }, `${lines.toLocaleString()} lines`),
+        sensitive > 0 && h("span", { class: "chip danger" }, `${sensitive} sensitive`),
+      ),
+      h(
+        "div",
+        { class: "panel-actions" },
+        h("button", { class: "primary", onclick: ctx.onExpand, title: "Show this folder's files and subfolders (or double-click it)" }, "Expand folder"),
+        ...(ctx.actions ?? []),
+      ),
+    ),
+    section(`Imports from (${ctx.outgoing.length})`, linkList(ctx.outgoing, "No imports leave this folder.", ctx)),
+    section(`Imported by (${ctx.incoming.length})`, linkList(ctx.incoming, "Nothing outside this folder imports it.", ctx)),
+    section(
+      `Files (${ctx.files.length})`,
+      h(
+        "ul",
+        { class: "edges" },
+        ...[...ctx.files]
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map((f) =>
+            h(
+              "li",
+              {},
+              h("button", { class: "link", onclick: () => ctx.onSelect(f.id), title: f.id }, f.id.slice(ctx.folder.length + 1)),
+            ),
+          ),
+      ),
+    ),
+  );
+}
+
+function linkList(links: UnitLink[], empty: string, ctx: GroupPanelContext): HTMLElement {
+  if (!links.length) return h("p", { class: "muted" }, empty);
+  return h(
+    "ul",
+    { class: "edges" },
+    ...links.map((l) =>
+      h(
+        "li",
+        {},
+        h("button", { class: "link", onclick: () => ctx.onSelect(l.unit) }, l.label),
+        h("span", { class: "edge-kind", title: "File-level imports" }, `${l.count}`),
+      ),
+    ),
+  );
 }

@@ -28,8 +28,8 @@ export interface SymbolResponse {
 
 /**
  * Everything the UI needs from wherever it runs. The VS Code webview talks to the extension
- * over postMessage; the standalone web UI talks to the Adam service over HTTP. The UI itself
- * never knows which.
+ * over postMessage; the internal browser dev/test harness talks to the local Adam service
+ * over HTTP. AI key management and provider calls are available only in the extension.
  */
 export interface Host {
   readonly kind: "vscode" | "browser";

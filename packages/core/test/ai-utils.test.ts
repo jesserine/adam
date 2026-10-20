@@ -142,7 +142,7 @@ describe("probeAiProviderKey", () => {
       const res = await probeAiProviderKey("claude", "sk-ant-testkey1234567890");
       expect(res.ok).toBe(false);
       expect(res.provider).toBe("claude");
-      expect(res.message).toBe("Incorrect API key provided");
+      expect(res.message).toBe("Provider request failed (HTTP 401). Check the API key and selected model, then try again.");
     } finally {
       global.fetch = originalFetch;
     }
@@ -156,7 +156,7 @@ describe("probeAiProviderKey", () => {
       const res = await probeAiProviderKey("grok", "xai-testkey1234567890");
       expect(res.ok).toBe(false);
       expect(res.provider).toBe("grok");
-      expect(res.message).toBe("Network connection refused");
+      expect(res.message).toBe("Provider request failed. Check the API key and network connection, then try again.");
     } finally {
       global.fetch = originalFetch;
     }

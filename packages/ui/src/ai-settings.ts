@@ -120,6 +120,9 @@ export async function openAiSettingsDialog(
   let testResult: AiValidationResult | null = null;
   let noticeMessage: string | null = null;
   let noticeType: "success" | "error" = "success";
+  let modelsByProvider: Partial<Record<AiProvider, string[]>> = {};
+  let modelRefreshState: "idle" | "loading" | "error" | "loaded" = "idle";
+  let modelRefreshMessage: string | null = null;
 
   // Elements
   const backdrop = h("div", { class: "ai-modal-backdrop", role: "presentation" });
@@ -458,7 +461,8 @@ export async function openAiSettingsDialog(
     detailPanel.append(keyGroup);
 
     // Model Selection Dropdown
-    const isCustomModel = Boolean(status?.selectedModel && !meta.availableModels.includes(status.selectedModel));
+    const availableModels = modelsByProvider[provider] ?? [...meta.availableModels];
+    const isCustomModel = Boolean(status?.selectedModel && !availableModels.includes(status.selectedModel));
     const currentSelectedModel = status?.selectedModel || meta.defaultModel;
 
     const customModelOption = h(
@@ -471,7 +475,7 @@ export async function openAiSettingsDialog(
     const modelSelect = h(
       "select",
       { class: "ai-model-select", "aria-label": "Select AI Model" },
-      ...meta.availableModels.map((m) => {
+      ...availableModels.map((m) => {
         const opt = h("option", { value: m }, m);
         if (!isCustomModel && m === currentSelectedModel) (opt as HTMLOptionElement).selected = true;
         return opt;
@@ -496,12 +500,48 @@ export async function openAiSettingsDialog(
       }
     });
 
+    const refreshModelsBtn = h(
+      "button",
+      {
+        class: "ghost ai-refresh-models-btn",
+        type: "button",
+        disabled: modelRefreshState === "loading",
+        onclick: async () => {
+          modelRefreshState = "loading";
+          modelRefreshMessage = null;
+          renderDetail();
+          try {
+            const models = await host.listAiModels(provider, enteredKey.trim() || undefined);
+            if (models.length === 0) {
+              modelsByProvider[provider] = [];
+              modelRefreshState = "error";
+              modelRefreshMessage = "The provider returned no compatible text-generation models. You can still enter a custom model ID.";
+            } else {
+              modelsByProvider[provider] = models;
+              modelRefreshState = "loaded";
+              modelRefreshMessage = `Loaded ${models.length} models from ${meta.name}.`;
+            }
+          } catch (err) {
+            modelRefreshState = "error";
+            modelRefreshMessage = (err as Error).message || "Could not refresh models.";
+          }
+          renderDetail();
+        },
+      },
+      modelRefreshState === "loading" ? "Refreshing…" : "↻ Refresh from provider",
+    );
+    const modelRefreshStatus = modelRefreshMessage
+      ? h("p", { class: `muted small ai-model-refresh-status${modelRefreshState === "error" ? " error" : ""}`, role: "status" }, modelRefreshMessage)
+      : h("p", { class: "muted small" }, "Model choices can be refreshed from your provider using your API key.");
+
     const modelGroup = h(
       "div",
       { class: "ai-field-group" },
       h("label", { class: "ai-field-label" }, "Model"),
       modelSelect,
       customModelInput,
+      h("div", { class: "ai-model-refresh-row" }, refreshModelsBtn),
+      modelRefreshStatus,
     );
     detailPanel.append(modelGroup);
 

@@ -47,6 +47,7 @@ export interface Host {
   deleteAiConfig(provider: AiProvider): Promise<AiConfigSummary>;
   setActiveAiProvider(provider: AiProvider): Promise<AiConfigSummary>;
   validateAiKey(req: ValidateAiKeyRequest): Promise<AiValidationResult>;
+  listAiModels(provider: AiProvider, apiKey?: string): Promise<string[]>;
   analyzeNodeThreats(req: AnalyzeThreatsRequest): Promise<NodeThreatReport>;
 }
 
@@ -63,6 +64,7 @@ export type WebviewRequest =
   | { type: "request"; id: number; method: "ai:deleteConfig"; params: DeleteAiConfigRequest }
   | { type: "request"; id: number; method: "ai:setActive"; params: { provider: AiProvider } }
   | { type: "request"; id: number; method: "ai:validateKey"; params: ValidateAiKeyRequest }
+  | { type: "request"; id: number; method: "ai:listModels"; params: { provider: AiProvider; apiKey?: string } }
   | { type: "request"; id: number; method: "ai:analyzeThreats"; params: AnalyzeThreatsRequest };
 
 export type ExtensionMessage =
@@ -115,6 +117,7 @@ export function createVsCodeHost(api: VsCodeApi): Host {
     deleteAiConfig: (provider) => request({ type: "request", method: "ai:deleteConfig", params: { provider } }),
     setActiveAiProvider: (provider) => request({ type: "request", method: "ai:setActive", params: { provider } }),
     validateAiKey: (req) => request({ type: "request", method: "ai:validateKey", params: req }),
+    listAiModels: (provider, apiKey) => request({ type: "request", method: "ai:listModels", params: { provider, apiKey } }),
     analyzeNodeThreats: (req) => request({ type: "request", method: "ai:analyzeThreats", params: req }),
   };
 }
@@ -142,6 +145,7 @@ export function createBrowserHost(): Host {
     deleteAiConfig: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
     setActiveAiProvider: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
     validateAiKey: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    listAiModels: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
     analyzeNodeThreats: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
   };
 }

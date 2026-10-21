@@ -274,6 +274,7 @@ function makeHost(overrides: Partial<Host> = {}): Host {
     deleteAiConfig: vi.fn(),
     setActiveAiProvider: vi.fn(),
     validateAiKey: vi.fn(),
+    listAiModels: vi.fn().mockResolvedValue([]),
     analyzeNodeThreats: vi.fn(),
     ...overrides,
   };

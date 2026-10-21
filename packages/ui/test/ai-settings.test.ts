@@ -347,6 +347,7 @@ describe("AI Settings Dialog Component", () => {
           latencyMs: 120,
         };
       }),
+      listAiModels: vi.fn().mockResolvedValue([]),
       analyzeNodeThreats: vi.fn(),
     };
   });

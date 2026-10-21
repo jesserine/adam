@@ -233,29 +233,3 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   res.end(JSON.stringify(body));
 }
-
-function readJsonBody<T>(req: http.IncomingMessage): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let raw = "";
-    req.setEncoding("utf8");
-    req.on("data", (chunk: string) => {
-      raw += chunk;
-      if (raw.length > 1024 * 1024) {
-        req.destroy();
-        reject(new HttpError(413, "Request body too large"));
-      }
-    });
-    req.on("end", () => {
-      if (!raw.trim()) {
-        resolve({} as T);
-        return;
-      }
-      try {
-        resolve(JSON.parse(raw) as T);
-      } catch {
-        reject(new HttpError(400, "Invalid JSON body"));
-      }
-    });
-    req.on("error", reject);
-  });
-}

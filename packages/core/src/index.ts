@@ -1,6 +1,11 @@
 export * from "./types";
 export * from "./ai-types";
-export { maskApiKey, validateApiKeyFormat, probeAiProviderKey } from "./ai-utils";
+export {
+  listAiProviderModels,
+  maskApiKey,
+  probeAiProviderKey,
+  validateApiKeyFormat,
+} from "./ai-utils";
 export {
   analyzeNodeSecurityThreats,
   buildThreatAnalysisPrompt,

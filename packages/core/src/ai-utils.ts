@@ -79,7 +79,6 @@ export async function listAiProviderModels(
         }
 
         if (provider === "claude" && payload.has_more && payload.last_id) {
-          const separator = url.includes("?") ? "&" : "?";
           nextUrl = `https://api.anthropic.com/v1/models?limit=1000&after_id=${encodeURIComponent(payload.last_id)}`;
         } else {
           nextUrl = undefined;

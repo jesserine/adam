@@ -92,6 +92,4 @@ describe("AdamService", () => {
     expect((await fetch(`${base}/`)).status).toBe(200);
     expect((await fetch(`${base}/..%2F..%2Fetc%2Fpasswd`)).status).toBe(404);
   });
-
-
 });

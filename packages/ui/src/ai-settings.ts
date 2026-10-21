@@ -513,7 +513,6 @@ export async function openAiSettingsDialog(
           try {
             const models = await host.listAiModels(provider, enteredKey.trim() || undefined);
             if (models.length === 0) {
-              modelsByProvider[provider] = [];
               modelRefreshState = "error";
               modelRefreshMessage = "The provider returned no compatible text-generation models. You can still enter a custom model ID.";
             } else {

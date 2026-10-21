@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import {
   AI_PROVIDERS,
   analyzeNodeSecurityThreats,
+  listAiProviderModels,
   probeAiProviderKey,
   type AiProvider,
   type GraphNode,
@@ -102,6 +103,13 @@ export class NetworkPanel implements vscode.Disposable {
           await this.secretManager.setActiveProvider(msg.params.provider);
           result = await this.secretManager.getConfigSummary();
           break;
+        case "ai:listModels": {
+          assertAiProvider(msg.params?.provider);
+          const apiKey = msg.params.apiKey || (await this.secretManager.getRawKey(msg.params.provider));
+          if (!apiKey) throw new Error("Enter or save an API key before refreshing models.");
+          result = await listAiProviderModels(msg.params.provider, apiKey);
+          break;
+        }
         case "ai:validateKey": {
           assertAiProvider(msg.params?.provider);
           const key = msg.params.apiKey || (await this.secretManager.getRawKey(msg.params.provider));

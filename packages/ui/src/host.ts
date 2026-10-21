@@ -1,4 +1,16 @@
-import type { CodeGraph, CodeSymbol, GraphNode } from "@adam/core";
+import type {
+  AiConfigSummary,
+  AiProvider,
+  AiValidationResult,
+  AnalyzeThreatsRequest,
+  CodeGraph,
+  CodeSymbol,
+  DeleteAiConfigRequest,
+  GraphNode,
+  NodeThreatReport,
+  SaveAiConfigRequest,
+  ValidateAiKeyRequest,
+} from "@adam/core";
 
 export interface NodeResponse {
   node: GraphNode;
@@ -16,8 +28,8 @@ export interface SymbolResponse {
 
 /**
  * Everything the UI needs from wherever it runs. The VS Code webview talks to the extension
- * over postMessage; the standalone web UI talks to the Adam service over HTTP. The UI itself
- * never knows which.
+ * over postMessage; the internal browser dev/test harness talks to the local Adam service
+ * over HTTP. AI key management and provider calls are available only in the extension.
  */
 export interface Host {
   readonly kind: "vscode" | "browser";
@@ -28,6 +40,15 @@ export interface Host {
   onGraphChanged(listener: () => void): void;
   /** Opens the file in a real editor for manual editing. Absent when there is no editor. */
   openFile?(path: string, line?: number): void;
+
+  // --- AI Provider & Key Management ---
+  getAiConfig(): Promise<AiConfigSummary>;
+  saveAiConfig(req: SaveAiConfigRequest): Promise<AiConfigSummary>;
+  deleteAiConfig(provider: AiProvider): Promise<AiConfigSummary>;
+  setActiveAiProvider(provider: AiProvider): Promise<AiConfigSummary>;
+  validateAiKey(req: ValidateAiKeyRequest): Promise<AiValidationResult>;
+  listAiModels(provider: AiProvider, apiKey?: string): Promise<string[]>;
+  analyzeNodeThreats(req: AnalyzeThreatsRequest): Promise<NodeThreatReport>;
 }
 
 /** Messages exchanged between the webview and the extension. */
@@ -36,7 +57,15 @@ export type WebviewRequest =
   | { type: "request"; id: number; method: "node"; params: { id: string } }
   | { type: "request"; id: number; method: "symbol"; params: { node: string; id: string } }
   | { type: "request"; id: number; method: "reindex" }
-  | { type: "openFile"; path: string; line?: number };
+  | { type: "openFile"; path: string; line?: number }
+  // --- AI Config Methods ---
+  | { type: "request"; id: number; method: "ai:getConfig" }
+  | { type: "request"; id: number; method: "ai:saveConfig"; params: SaveAiConfigRequest }
+  | { type: "request"; id: number; method: "ai:deleteConfig"; params: DeleteAiConfigRequest }
+  | { type: "request"; id: number; method: "ai:setActive"; params: { provider: AiProvider } }
+  | { type: "request"; id: number; method: "ai:validateKey"; params: ValidateAiKeyRequest }
+  | { type: "request"; id: number; method: "ai:listModels"; params: { provider: AiProvider; apiKey?: string } }
+  | { type: "request"; id: number; method: "ai:analyzeThreats"; params: AnalyzeThreatsRequest };
 
 export type ExtensionMessage =
   | { type: "response"; id: number; ok: true; result: unknown }
@@ -46,13 +75,13 @@ export type ExtensionMessage =
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type RequestBody = DistributiveOmit<Extract<WebviewRequest, { type: "request" }>, "id">;
 
-interface VsCodeApi {
+export interface VsCodeApi {
   postMessage(message: WebviewRequest): void;
 }
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
-function createVsCodeHost(api: VsCodeApi): Host {
+export function createVsCodeHost(api: VsCodeApi): Host {
   let nextId = 1;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   const listeners: Array<() => void> = [];
@@ -83,10 +112,17 @@ function createVsCodeHost(api: VsCodeApi): Host {
     reindex: () => request({ type: "request", method: "reindex" }),
     onGraphChanged: (l) => listeners.push(l),
     openFile: (path, line) => api.postMessage({ type: "openFile", path, line }),
+    getAiConfig: () => request({ type: "request", method: "ai:getConfig" }),
+    saveAiConfig: (req) => request({ type: "request", method: "ai:saveConfig", params: req }),
+    deleteAiConfig: (provider) => request({ type: "request", method: "ai:deleteConfig", params: { provider } }),
+    setActiveAiProvider: (provider) => request({ type: "request", method: "ai:setActive", params: { provider } }),
+    validateAiKey: (req) => request({ type: "request", method: "ai:validateKey", params: req }),
+    listAiModels: (provider, apiKey) => request({ type: "request", method: "ai:listModels", params: { provider, apiKey } }),
+    analyzeNodeThreats: (req) => request({ type: "request", method: "ai:analyzeThreats", params: req }),
   };
 }
 
-function createBrowserHost(): Host {
+export function createBrowserHost(): Host {
   // The token rides in the URL fragment, which browsers never send to a server or a referrer.
   const token = new URLSearchParams(location.hash.slice(1)).get("token") ?? "";
   const call = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
@@ -104,6 +140,13 @@ function createBrowserHost(): Host {
       const events = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
       events.addEventListener("graph", () => listener());
     },
+    getAiConfig: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    saveAiConfig: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    deleteAiConfig: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    setActiveAiProvider: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    validateAiKey: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    listAiModels: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
+    analyzeNodeThreats: () => Promise.reject(new Error("AI features are available in the VS Code extension only.")),
   };
 }
 

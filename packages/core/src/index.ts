@@ -1,4 +1,19 @@
 export * from "./types";
+export * from "./ai-types";
+export {
+  listAiProviderModels,
+  maskApiKey,
+  probeAiProviderKey,
+  validateApiKeyFormat,
+} from "./ai-utils";
+export {
+  analyzeNodeSecurityThreats,
+  buildThreatAnalysisPrompt,
+  REPORT_SECURITY_THREATS_NAME,
+  REPORT_SECURITY_THREATS_DESCRIPTION,
+  REPORT_SECURITY_THREATS_SCHEMA,
+  type AnalyzeThreatsOptions,
+} from "./ai-threats";
 export { indexRepository } from "./indexer";
 export { languageOf, SCRIPT_EXTENSIONS } from "./language";
 export { parseScript } from "./parse-script";

@@ -3,7 +3,13 @@ import * as fs from "node:fs";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "node:path";
-import { indexRepository, readNodeContent, readSymbolCode, type CodeGraph, type IndexOptions } from "@adam/core";
+import {
+  indexRepository,
+  readNodeContent,
+  readSymbolCode,
+  type CodeGraph,
+  type IndexOptions,
+} from "@adam/core";
 
 export interface ServiceOptions extends IndexOptions {
   /** Shared secret every API call must present. Generated when omitted. */
@@ -36,7 +42,7 @@ class HttpError extends Error {
 
 /**
  * The local Adam service: owns the index for one repository and serves it to any client
- * (the VS Code extension, the standalone web UI, later a desktop app) over localhost.
+ * (the VS Code extension and internal browser dev/test harness) over localhost.
  *
  * It listens on 127.0.0.1 only, requires a bearer token on every API call, and rejects
  * foreign Host and Origin headers so web pages in the user's browser cannot read the graph.

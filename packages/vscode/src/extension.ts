@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { VsCodeAiSecretManager } from "./ai-secret-manager";
 import { NetworkPanel } from "./network-panel";
 import { ServiceClient } from "./service-client";
 
@@ -7,6 +8,7 @@ const clients = new Map<string, ServiceClient>();
 export function activate(context: vscode.ExtensionContext): void {
   const log = vscode.window.createOutputChannel("Adam");
   const serviceScript = vscode.Uri.joinPath(context.extensionUri, "dist", "service.js").fsPath;
+  const secretManager = new VsCodeAiSecretManager(context.secrets, context.globalState);
 
   const clientFor = (folder: vscode.WorkspaceFolder): ServiceClient => {
     const key = folder.uri.toString();
@@ -54,7 +56,7 @@ export function activate(context: vscode.ExtensionContext): void {
     status,
     vscode.commands.registerCommand(
       "adam.openNetwork",
-      withClient(async (client) => NetworkPanel.show(context.extensionUri, client)),
+      withClient(async (client) => NetworkPanel.show(context.extensionUri, client, secretManager)),
     ),
     vscode.commands.registerCommand(
       "adam.reindex",

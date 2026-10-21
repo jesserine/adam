@@ -1,4 +1,5 @@
-import type { CodeGraph } from "@adam/core";
+import type { AiConfigSummary, CodeGraph } from "@adam/core";
+import { getAiButtonInfo, openAiSettingsDialog } from "./ai-settings";
 import { collapsible, h } from "./dom";
 import { createHost } from "./host";
 import { adjacency, buildTree, isGroupId, type TreeEntry } from "./model";
@@ -49,6 +50,37 @@ const infoSection = collapsible("Node info", { class: "side-info" }, panelEl);
 infoSection.querySelector("summary")!.replaceChildren(infoTitle);
 const groupsSection = collapsible("Groups", { class: "side-groups" }, h("label", { class: "group-row all" }, selectAll, h("span", {}, "Show all")), groupsEl);
 
+const aiButton = h(
+  "button",
+  {
+    class: "ghost ai-settings-btn",
+    title: "Configure AI providers & API keys",
+    onclick: () => void openAiSettingsDialog(host, (summary) => void updateAiButton(summary)),
+  },
+  "✨ Configure AI",
+);
+aiButton.hidden = host.kind !== "vscode";
+
+async function updateAiButton(summary?: AiConfigSummary): Promise<void> {
+  if (host.kind !== "vscode") {
+    aiButton.hidden = true;
+    return;
+  }
+  aiButton.hidden = false;
+  try {
+    const config = summary ?? (await host.getAiConfig());
+    const info = getAiButtonInfo(config);
+    aiButton.replaceChildren();
+    if (info.isActive) {
+      aiButton.append(h("span", { class: "ai-active-dot", "aria-hidden": "true" }), info.label);
+    } else {
+      aiButton.textContent = info.label;
+    }
+  } catch {
+    aiButton.textContent = "✨ Configure AI";
+  }
+}
+
 document.body.append(
   h(
     "div",
@@ -64,6 +96,7 @@ document.body.append(
       h("button", { class: "ghost", onclick: () => network.expandAll(), title: "Show every file" }, "Expand all"),
       h("button", { class: "ghost", onclick: () => network.collapseAll(), title: "Fold every folder back into its cluster" }, "Collapse all"),
       h("button", { class: "ghost", onclick: () => network.fit(), title: "Fit what is on screen" }, "Fit"),
+      aiButton,
     ),
     h(
       "main",
@@ -375,3 +408,4 @@ async function reindex(): Promise<void> {
 
 host.onGraphChanged(() => void load());
 void load();
+void updateAiButton();

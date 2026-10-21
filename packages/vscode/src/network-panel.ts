@@ -1,8 +1,17 @@
 import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import {
+  AI_PROVIDERS,
+  analyzeNodeSecurityThreats,
+  listAiProviderModels,
+  probeAiProviderKey,
+  type AiProvider,
+  type GraphNode,
+} from "@adam/core";
 import { sensitiveReason } from "@adam/core/src/sensitive";
 import type { ExtensionMessage, WebviewRequest } from "@adam/ui/src/host";
+import type { VsCodeAiSecretManager } from "./ai-secret-manager";
 import type { ServiceClient } from "./service-client";
 
 /** The full-window network view for one workspace folder. */
@@ -10,14 +19,18 @@ export class NetworkPanel implements vscode.Disposable {
   private static readonly panels = new Map<string, NetworkPanel>();
   private readonly disposables: vscode.Disposable[] = [];
 
-  static show(extensionUri: vscode.Uri, client: ServiceClient): void {
+  static show(
+    extensionUri: vscode.Uri,
+    client: ServiceClient,
+    secretManager: VsCodeAiSecretManager,
+  ): void {
     const key = client.folder.uri.toString();
     const existing = NetworkPanel.panels.get(key);
     if (existing) {
       existing.panel.reveal();
       return;
     }
-    NetworkPanel.panels.set(key, new NetworkPanel(extensionUri, client));
+    NetworkPanel.panels.set(key, new NetworkPanel(extensionUri, client, secretManager));
   }
 
   private readonly panel: vscode.WebviewPanel;
@@ -25,6 +38,7 @@ export class NetworkPanel implements vscode.Disposable {
   private constructor(
     extensionUri: vscode.Uri,
     private readonly client: ServiceClient,
+    private readonly secretManager: VsCodeAiSecretManager,
   ) {
     const uiRoot = vscode.Uri.joinPath(extensionUri, "dist", "ui");
     this.panel = vscode.window.createWebviewPanel("adam.network", `Adam: ${client.folder.name}`, vscode.ViewColumn.One, {
@@ -71,10 +85,92 @@ export class NetworkPanel implements vscode.Disposable {
         case "reindex":
           result = await this.client.request("POST", "/api/reindex");
           break;
+        case "ai:getConfig":
+          result = await this.secretManager.getConfigSummary();
+          break;
+        case "ai:saveConfig":
+          assertAiProvider(msg.params?.provider);
+          await this.secretManager.saveKey(msg.params);
+          result = await this.secretManager.getConfigSummary();
+          break;
+        case "ai:deleteConfig":
+          assertAiProvider(msg.params?.provider);
+          await this.secretManager.deleteKey(msg.params.provider);
+          result = await this.secretManager.getConfigSummary();
+          break;
+        case "ai:setActive":
+          assertAiProvider(msg.params?.provider);
+          await this.secretManager.setActiveProvider(msg.params.provider);
+          result = await this.secretManager.getConfigSummary();
+          break;
+        case "ai:listModels": {
+          assertAiProvider(msg.params?.provider);
+          const apiKey = msg.params.apiKey || (await this.secretManager.getRawKey(msg.params.provider));
+          if (!apiKey) throw new Error("Enter or save an API key before refreshing models.");
+          result = await listAiProviderModels(msg.params.provider, apiKey);
+          break;
+        }
+        case "ai:validateKey": {
+          assertAiProvider(msg.params?.provider);
+          const key = msg.params.apiKey || (await this.secretManager.getRawKey(msg.params.provider));
+          if (!key) {
+            result = {
+              provider: msg.params.provider,
+              ok: false,
+              message: "No API key configured for provider",
+            };
+          } else {
+            const probeResult = await probeAiProviderKey(msg.params.provider, key);
+            await this.secretManager.recordTestResult(
+              msg.params.provider,
+              probeResult.ok,
+              probeResult.ok ? undefined : probeResult.message,
+            );
+            result = probeResult;
+          }
+          break;
+        }
+        case "ai:analyzeThreats": {
+          if (!msg.params?.nodeId) throw new Error("Missing nodeId");
+          const summary = await this.secretManager.getConfigSummary();
+          const activeProvider = summary.activeProvider;
+          if (!activeProvider) {
+            throw new Error("No active AI provider configured");
+          }
+          const apiKey = await this.secretManager.getRawKey(activeProvider);
+          if (!apiKey) {
+            throw new Error(`No API key configured for provider ${activeProvider}`);
+          }
+          const model = summary.providers[activeProvider]?.selectedModel;
+          const nodeRes = await this.client.request<{
+            node: GraphNode;
+            content: string;
+            masked: boolean;
+            redactions: number;
+          }>("GET", `/api/node?id=${encodeURIComponent(msg.params.nodeId)}`);
+
+          if (nodeRes.node.sensitive) {
+            throw new Error("Sensitive files cannot be sent to an AI model");
+          }
+
+          result = await analyzeNodeSecurityThreats({
+            node: nodeRes.node,
+            content: {
+              content: nodeRes.content,
+              masked: nodeRes.masked,
+              redactions: nodeRes.redactions,
+            },
+            provider: activeProvider,
+            apiKey,
+            model,
+          });
+          break;
+        }
       }
       this.post({ type: "response", id: msg.id, ok: true, result });
     } catch (err) {
-      this.post({ type: "response", id: msg.id, ok: false, error: (err as Error).message });
+      const message = err instanceof Error ? err.message : "AI operation failed.";
+      this.post({ type: "response", id: msg.id, ok: false, error: message.slice(0, 240) });
     }
   }
 
@@ -124,5 +220,11 @@ export class NetworkPanel implements vscode.Disposable {
     <script nonce="${nonce}" src="${script}"></script>
   </body>
 </html>`;
+  }
+}
+
+function assertAiProvider(value: unknown): asserts value is AiProvider {
+  if (typeof value !== "string" || !AI_PROVIDERS.includes(value as AiProvider)) {
+    throw new Error("Unsupported AI provider.");
   }
 }

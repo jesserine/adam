@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  listAiProviderModels,
   maskApiKey,
   probeAiProviderKey,
   validateApiKeyFormat,
@@ -177,6 +178,60 @@ describe("probeAiProviderKey", () => {
       expect(res.ok).toBe(false);
       expect(res.provider).toBe("grok");
       expect(res.message).toBe("Provider request failed. Check the API key and network connection, then try again.");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+});
+
+describe("listAiProviderModels", () => {
+  it("lists compatible OpenAI chat models and filters unrelated model families", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [
+          { id: "gpt-5.5" },
+          { id: "gpt-4o-mini" },
+          { id: "text-embedding-3-large" },
+          { id: "gpt-image-1" },
+          { id: "whisper-1" },
+        ],
+      }),
+    } as unknown as Response);
+    try {
+      const models = await listAiProviderModels("chatgpt", "sk-test-key");
+      expect(models).toEqual(["gpt-4o-mini", "gpt-5.5"]);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("uses the Gemini API-key header and only returns generateContent models", async () => {
+    const originalFetch = global.fetch;
+    let capturedUrl = "";
+    let capturedHeaders: Record<string, string> = {};
+    global.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      capturedUrl = url;
+      capturedHeaders = init?.headers as Record<string, string>;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          models: [
+            { name: "models/gemini-3.8-flash", supportedGenerationMethods: ["generateContent"] },
+            { name: "models/text-embedding-004", supportedGenerationMethods: ["embedContent"] },
+            { name: "models/gemini-live", supportedGenerationMethods: ["bidiGenerateContent"] },
+          ],
+        }),
+      } as unknown as Response;
+    });
+    try {
+      const models = await listAiProviderModels("gemini", "AQ.test-key");
+      expect(models).toEqual(["gemini-3.8-flash"]);
+      expect(capturedUrl).not.toContain("AQ.test-key");
+      expect(capturedHeaders["x-goog-api-key"]).toBe("AQ.test-key");
     } finally {
       global.fetch = originalFetch;
     }
